@@ -1,0 +1,18 @@
+{
+  "core:bookmarks": true,
+  "core:command-palette": true,
+  "core:file-explorer": true,
+  "core:global-search": true,
+  "core:graph": true,
+  "core:markdown-importer": true,
+  "core:outline": true,
+  "core:outgoing-link": true,
+  "core:page-preview": true,
+  "core:property-editor": true,
+  "core:random-note": true,
+  "core:slash-command": true,
+  "core:switcher": true,
+  "core:tag-pane": true,
+  "core:templates": true,
+  "core:word-count": true
+}

@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual env
+venv/
+.venv/
+env/
+
+# Databases
+*.db
+*.sqlite3
+*.sqlite
+
+# ChromaDB data
+chroma_data/
+chroma/
+
+# Uploads
+uploads/
+
+# Environment
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Obsidian (keep config, ignore workspace)
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+
+# Logs
+*.log
+nohup.out
+
+# Node (for ponytail skill)
+node_modules/

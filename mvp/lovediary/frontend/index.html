@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>恋心记录 · LoveDiary</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <!-- 顶部导航 -->
+    <header class="header">
+        <div class="header-inner">
+            <h1 class="logo">
+                <span class="logo-icon">💕</span>
+                <span class="logo-text">恋心记录</span>
+            </h1>
+            <div class="header-actions">
+                <span id="userDisplay" class="user-display"></span>
+                <button id="logoutBtn" class="btn btn-ghost" style="display:none">退出</button>
+            </div>
+        </div>
+    </header>
+
+    <!-- 主内容区 -->
+    <main class="main-container">
+        <!-- 未登录状态 -->
+        <section id="authSection" class="auth-section">
+            <div class="auth-card">
+                <div class="auth-hero">
+                    <div class="auth-emoji">💝</div>
+                    <h2>记录属于我们的每一刻</h2>
+                    <p class="auth-subtitle">时间线 · 纪念日 · 甜蜜回忆</p>
+                </div>
+                <div id="authForms" class="auth-forms">
+                    <!-- 登录表单 -->
+                    <form id="loginForm" class="auth-form">
+                        <h3>登录</h3>
+                        <div class="form-group">
+                            <label for="loginUsername">用户名</label>
+                            <input type="text" id="loginUsername" placeholder="你的昵称" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="loginPassword">密码</label>
+                            <input type="password" id="loginPassword" placeholder="密码" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-full">进入我们的空间</button>
+                    </form>
+
+                    <div class="auth-divider">
+                        <span>还没有账号？</span>
+                    </div>
+
+                    <!-- 注册表单 -->
+                    <form id="registerForm" class="auth-form">
+                        <h3>创建属于你们的空间</h3>
+                        <div class="form-group">
+                            <label for="regUsername">用户名</label>
+                            <input type="text" id="regUsername" placeholder="你的昵称" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="regPassword">密码</label>
+                            <input type="password" id="regPassword" placeholder="设置密码" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="regCoupleCode">情侣码（选填）</label>
+                            <input type="text" id="regCoupleCode" placeholder="和对方设置相同的情侣码，共享空间">
+                        </div>
+                        <button type="submit" class="btn btn-secondary btn-full">创建空间</button>
+                    </form>
+                </div>
+            </div>
+        </section>
+
+        <!-- 已登录状态 -->
+        <section id="mainSection" class="main-section" style="display:none">
+            <!-- 发布瞬间 -->
+            <div class="card post-card">
+                <button id="openPostBtn" class="btn btn-primary btn-full">
+                    ✨ 记录一个甜蜜瞬间
+                </button>
+                <div id="postFormContainer" class="post-form-container" style="display:none">
+                    <form id="momentForm">
+                        <div class="form-group">
+                            <input type="text" id="momentTitle" placeholder="标题（比如：第一次约会）" required>
+                        </div>
+                        <div class="form-group">
+                            <textarea id="momentContent" placeholder="写下你们的故事..." rows="3"></textarea>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <input type="date" id="momentDate" required>
+                            </div>
+                            <div class="form-group">
+                                <input type="text" id="momentTags" placeholder="标签，逗号分隔（约会、旅行...）">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <input type="file" id="momentImage" accept="image/*">
+                            </div>
+                            <div class="form-group">
+                                <button type="button" id="getLocationBtn" class="btn btn-ghost">
+                                    📍 获取位置
+                                </button>
+                            </div>
+                        </div>
+                        <div id="locationInfo" class="location-info" style="display:none"></div>
+                        <input type="hidden" id="momentLat">
+                        <input type="hidden" id="momentLng">
+                        <input type="hidden" id="momentLocName">
+                        <div class="post-actions">
+                            <button type="submit" class="btn btn-primary">发布瞬间</button>
+                            <button type="button" id="cancelPostBtn" class="btn btn-ghost">取消</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- 纪念日倒计时 -->
+            <div class="card anniversaries-card">
+                <div class="card-header">
+                    <h3>💫 纪念日</h3>
+                    <button id="openAnniversaryBtn" class="btn btn-sm btn-ghost">+ 添加</button>
+                </div>
+                <div id="anniversaryList" class="anniversary-list">
+                    <div class="empty-state">还没有纪念日，添加一个吧</div>
+                </div>
+                <div id="anniversaryFormContainer" class="post-form-container" style="display:none">
+                    <form id="anniversaryForm">
+                        <div class="form-group">
+                            <input type="text" id="anniversaryName" placeholder="纪念日名称（恋爱纪念日）" required>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <input type="date" id="anniversaryDate" required>
+                            </div>
+                            <div class="form-group">
+                                <select id="anniversaryType">
+                                    <option value="love_start">恋爱开始</option>
+                                    <option value="first_date">第一次约会</option>
+                                    <option value="proposal">求婚</option>
+                                    <option value="wedding">结婚</option>
+                                    <option value="custom">自定义</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="post-actions">
+                            <button type="submit" class="btn btn-primary">保存</button>
+                            <button type="button" id="cancelAnniversaryBtn" class="btn btn-ghost">取消</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- 时间线 -->
+            <div class="timeline-section">
+                <h2 class="section-title">📖 我们的时间线</h2>
+                <div id="timelineContainer" class="timeline-container">
+                    <div id="loadingState" class="loading-state">
+                        <div class="spinner"></div>
+                        <p>正在加载回忆...</p>
+                    </div>
+                    <div id="emptyState" class="empty-state" style="display:none">
+                        <div class="empty-emoji">💌</div>
+                        <p>还没有任何瞬间</p>
+                        <p class="empty-hint">记录你们的第一个甜蜜时刻吧</p>
+                    </div>
+                    <div id="errorState" class="error-state" style="display:none">
+                        <p>加载失败，请刷新重试</p>
+                    </div>
+                    <div id="timelineList" class="timeline-list"></div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script src="js/utils.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/components/moment-form.js"></script>
+    <script src="js/components/anniversary.js"></script>
+    <script src="js/components/timeline.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

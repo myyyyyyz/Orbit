@@ -1,0 +1,18 @@
+# IDE
+.idea/
+.vscode/
+.cursor/
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+
+# Node
+node_modules/
+
+# Logs
+*.log
