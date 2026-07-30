@@ -4,11 +4,12 @@ import { useState, useCallback } from "react";
 import { Sidebar } from "@/components/sidebar/sidebar";
 import { ChatInterface } from "@/components/chat/chat-interface";
 import { KnowledgeBasePanel } from "@/components/knowledge-base/kb-panel";
+import { SearchPanel } from "@/components/search/search-panel";
 import { AgentPanel } from "@/components/agent/agent-panel";
 import { SettingsPanel } from "@/components/settings/settings-panel";
 import { motion, AnimatePresence } from "motion/react";
 
-type Tab = "chat" | "knowledge" | "agent" | "settings";
+type Tab = "chat" | "knowledge" | "search" | "agent" | "settings";
 
 interface Conversation {
   id: string;
@@ -37,6 +38,8 @@ export default function Home() {
         return <ChatInterface key="chat" />;
       case "knowledge":
         return <KnowledgeBasePanel key="knowledge" />;
+      case "search":
+        return <SearchPanel key="search" />;
       case "agent":
         return <AgentPanel key="agent" />;
       case "settings":

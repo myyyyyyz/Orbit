@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import {
   MessageSquare,
   BookOpen,
+  Search,
   Eye,
   Settings,
   Plus,
@@ -11,7 +12,7 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 
-type Tab = "chat" | "knowledge" | "agent" | "settings";
+type Tab = "chat" | "knowledge" | "search" | "agent" | "settings";
 
 interface SidebarProps {
   activeTab: Tab;
@@ -25,6 +26,7 @@ interface SidebarProps {
 const navItems: { id: Tab; label: string; icon: typeof MessageSquare }[] = [
   { id: "chat", label: "对话", icon: MessageSquare },
   { id: "knowledge", label: "知识库", icon: BookOpen },
+  { id: "search", label: "搜索", icon: Search },
   { id: "agent", label: "Agent 观察", icon: Eye },
   { id: "settings", label: "设置", icon: Settings },
 ];

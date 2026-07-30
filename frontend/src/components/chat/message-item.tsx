@@ -5,6 +5,7 @@ import { motion, useReducedMotion } from "motion/react";
 import { User, Sparkles, Copy, ThumbsUp, ThumbsDown } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
+import { SourcePopover } from "./source-popover";
 
 export interface Message {
   id: string;
@@ -64,14 +65,13 @@ export function MessageItem({ message }: MessageItemProps) {
               来源引用
             </p>
             {message.sources.map((src, i) => (
-              <div
-                key={i}
-                className="rounded-md border border-border bg-surface px-3 py-2 text-xs text-muted
-                           hover:border-primary/30 transition-colors duration-150 cursor-pointer"
-              >
-                <span className="font-medium text-foreground/80">{src.filename}</span>
-                <p className="mt-0.5 line-clamp-2">{src.chunk}</p>
-              </div>
+              <SourcePopover key={i} filename={src.filename} chunk={src.chunk}>
+                <span className="inline-flex items-center rounded-md border border-border bg-surface px-2 py-0.5
+                               text-[11px] text-primary/80 hover:text-primary hover:border-primary/30
+                               transition-colors duration-150 cursor-pointer">
+                  {src.filename}
+                </span>
+              </SourcePopover>
             ))}
           </div>
         )}
