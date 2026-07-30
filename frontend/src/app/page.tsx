@@ -1,8 +1,6 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { useAuth } from "@/lib/auth-context";
-import { AuthForm } from "@/components/auth/auth-form";
 import { Sidebar } from "@/components/sidebar/sidebar";
 import { ChatInterface } from "@/components/chat/chat-interface";
 import { KnowledgeBasePanel } from "@/components/knowledge-base/kb-panel";
@@ -18,7 +16,6 @@ interface Conversation {
 }
 
 export default function Home() {
-  const { isAuthenticated } = useAuth();
   const [activeTab, setActiveTab] = useState<Tab>("chat");
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversation, setActiveConversation] = useState<string | null>(null);
@@ -33,11 +30,6 @@ export default function Home() {
     setActiveConversation(id);
     setActiveTab("chat");
   }, []);
-
-  // Not authenticated -> show login form
-  if (!isAuthenticated) {
-    return <AuthForm />;
-  }
 
   const renderPanel = () => {
     switch (activeTab) {

@@ -1,13 +1,11 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { useAuth } from "@/lib/auth-context";
 import {
   MessageSquare,
   BookOpen,
   Eye,
   Settings,
-  LogOut,
   Plus,
   Zap,
 } from "lucide-react";
@@ -39,8 +37,6 @@ export function Sidebar({
   activeConversation,
   onSelectConversation,
 }: SidebarProps) {
-  const { username, logout } = useAuth();
-
   return (
     <aside className="flex h-full w-[260px] shrink-0 flex-col border-r border-border bg-[#0c1525]">
       {/* Logo */}
@@ -105,21 +101,9 @@ export function Sidebar({
         </div>
       )}
 
-      {/* User + Logout */}
+      {/* User */}
       <div className="border-t border-border/50 px-4 py-3">
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-muted truncate max-w-[140px]">
-            {username || "未登录"}
-          </span>
-          <button
-            onClick={logout}
-            className="rounded-md p-1 text-muted hover:bg-surface hover:text-foreground
-                       transition-colors duration-150 cursor-pointer"
-            title="退出登录"
-          >
-            <LogOut className="h-3.5 w-3.5" />
-          </button>
-        </div>
+        <span className="text-xs text-muted">Orbit v1.0</span>
       </div>
     </aside>
   );

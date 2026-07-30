@@ -1,13 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useAuth } from "@/lib/auth-context";
 import { system } from "@/lib/api";
 import { Settings, Cpu, Database, Zap, CheckCircle2, XCircle, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function SettingsPanel() {
-  const { isAuthenticated } = useAuth();
   const [health, setHealth] = useState<Record<string, string> | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
   const [model, setModel] = useState("gpt-4o-mini");
@@ -142,21 +140,7 @@ export function SettingsPanel() {
           </div>
         </section>
 
-        {/* Auth Status */}
-        <section>
-          <h3 className="flex items-center gap-2 text-sm font-medium mb-3">
-            <Settings className="h-4 w-4 text-muted" />
-            账户
-          </h3>
-          <div className="rounded-xl border border-border bg-surface/50 p-4">
-            <div className="flex items-center gap-1.5 text-sm">
-              <StatusIcon ok={isAuthenticated} />
-              <span className={isAuthenticated ? "text-success" : "text-error"}>
-                {isAuthenticated ? "已登录" : "未登录 — 部分功能受限"}
-              </span>
-            </div>
-          </div>
-        </section>
+
       </div>
     </div>
   );
