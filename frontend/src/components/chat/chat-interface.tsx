@@ -5,21 +5,20 @@ import { Message, MessageItem } from "./message-item";
 import { InputBox } from "./input-box";
 import { knowledge } from "@/lib/api";
 
-let messageId = 0;
-
 export function ChatInterface() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const messageIdRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages.length]);
 
   const handleSend = useCallback(async (content: string) => {
     const userMsg: Message = {
-      id: `msg-${++messageId}`,
+      id: `msg-${++messageIdRef.current}`,
       role: "user",
       content,
       timestamp: Date.now(),
@@ -33,7 +32,7 @@ export function ChatInterface() {
     let assistantContent = "";
 
     const assistantMsg: Message = {
-      id: `msg-${++messageId}`,
+      id: `msg-${++messageIdRef.current}`,
       role: "assistant",
       content: "",
       timestamp: Date.now(),

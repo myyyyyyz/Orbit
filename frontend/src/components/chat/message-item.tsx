@@ -1,8 +1,10 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import { User, Sparkles, Copy, ThumbsUp, ThumbsDown } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import rehypeSanitize from "rehype-sanitize";
 
 export interface Message {
   id: string;
@@ -16,37 +18,17 @@ interface MessageItemProps {
   message: Message;
 }
 
-function thinkMarkdownToHtml(text: string): string {
-  // Simple markdown-like rendering
-  let html = text
-    .replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
-      return `<pre><code class="language-${lang}">${escapeHtml(code.trim())}</code></pre>`;
-    })
-    .replace(/`([^`]+)`/g, "<code>$1</code>")
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*([^*]+)\*/g, "<em>$1</em>")
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
-    .replace(/\n/g, "<br/>");
-  return html;
-}
-
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
 export function MessageItem({ message }: MessageItemProps) {
   const isUser = message.role === "user";
+  const reduce = useReducedMotion();
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 8 }}
+      initial={reduce ? false : { opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
       className={cn(
-        "flex gap-3 px-4 py-5",
+        "flex gap-3 px-4 py-5 group",
         isUser ? "bg-transparent" : "bg-surface/50"
       )}
     >
@@ -62,18 +44,17 @@ export function MessageItem({ message }: MessageItemProps) {
 
       {/* Content */}
       <div className="min-w-0 flex-1">
-        <div
-          className={cn(
-            "text-sm leading-relaxed",
-            isUser ? "text-foreground" : "markdown text-foreground/90"
+        <div className={cn(
+          "text-sm leading-relaxed",
+          isUser ? "text-foreground" : "markdown text-foreground/90"
+        )}>
+          {isUser ? (
+            message.content
+          ) : (
+            <ReactMarkdown rehypePlugins={[rehypeSanitize]}>
+              {message.content}
+            </ReactMarkdown>
           )}
-          dangerouslySetInnerHTML={
-            isUser
-              ? undefined
-              : { __html: thinkMarkdownToHtml(message.content) }
-          }
-        >
-          {isUser ? message.content : undefined}
         </div>
 
         {/* Sources */}
@@ -98,7 +79,11 @@ export function MessageItem({ message }: MessageItemProps) {
         {/* Actions (assistant only) */}
         {!isUser && (
           <div className="mt-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button className="rounded p-1 text-muted hover:text-foreground transition-colors cursor-pointer" title="复制">
+            <button
+              className="rounded p-1 text-muted hover:text-foreground transition-colors cursor-pointer"
+              title="复制"
+              onClick={() => navigator.clipboard.writeText(message.content)}
+            >
               <Copy className="h-3 w-3" />
             </button>
             <button className="rounded p-1 text-muted hover:text-success transition-colors cursor-pointer" title="有用">
