@@ -157,6 +157,13 @@ class Settings:
     UPLOAD_DIR: str = os.path.join(os.path.dirname(__file__), "..", "uploads")
     MAX_FILE_SIZE: int = 20 * 1024 * 1024  # 20 MB
 
+    # 数据库 URL 抽象（默认 SQLite，生产可切 PostgreSQL）
+    # 例: DATABASE_URL=postgresql://user:pass@host:5432/db
+    DATABASE_URL: str = os.getenv(
+        "DATABASE_URL",
+        f"sqlite:///{os.path.join(os.path.dirname(__file__), '..', 'multitenant.db')}",
+    )
+
     # 兼容旧接口
     @property
     def CHROMA_PERSIST_DIR(self) -> str:

@@ -101,3 +101,63 @@ Controller 在每轮循环结束后：
 5. **任务最终完成**（ALL_PASS + 用户签字）后，清理对应归档目录
 
 User Agent 的截图保留在 `.codebuddy/screenshots/{task_id}/`，直到用户确认可清理。
+
+---
+
+## 未来扩展：从文件通信到消息队列
+
+当前 Agent 间通过 `memory/loop-*.md` 文件通信，适合单机部署。当需要多机并行运行不同 Agent 时，有以下升级路径：
+
+### 阶段 1：Redis Pub/Sub（分布式文件替代）
+
+将 `memory/` 目录内容替换为 Redis 键值存储：
+
+```
+memory/loop-plan.md         → redis GET orbit:{task_id}:plan
+memory/loop-builder-output.md → redis GET orbit:{task_id}:builder_output
+memory/loop-review-result.md → redis GET orbit:{task_id}:review
+memory/loop-state.md         → redis GET orbit:{task_id}:state
+```
+
+- **优点**：改动最小，保持架构语义不变；支持多机共享
+- **实现**：`run-loop.sh` 中的 `cat` / `echo` → `redis-cli GET/SET`
+- **适合**：2-5 台机器的小规模分布式部署
+
+### 阶段 2：NATS / RabbitMQ 事件驱动（异步 Agent 调度）
+
+以任务为事件驱动 Agent 生命周期：
+
+```
+计划完成 → AgentOrchestrator.PlanCompleted Event
+  → Builder Agent 订阅 → 生成代码 → Builder.OutputReady Event
+    → Reviewer Agent 订阅 → 审查 → Reviewer.Verdict Event
+      → Controller 根据判决决定继续/退回/升级
+```
+
+- **优点**：解耦 Agent 生命周期，支持动态扩缩；失败自动重试
+- **实现**：用 Python `asyncio` + `nats-py` 替换 bash 脚本编排
+- **适合**：10+ 台机器、多个任务并行的中大型部署
+
+### 阶段 3：Temporal / Cadence（工作流引擎）
+
+以 Durable Execution 引擎管理整个 Agent Loop 状态机：
+
+```
+Workflow: CodeReviewLoop
+  ├─ Activity: PlanTask
+  ├─ Activity: BuildTask
+  ├─ Activity: ReviewTask
+  └─ Signal: UserApproval
+```
+
+- **优点**：自动重试、超时管理、断点恢复、可观测性内建
+- **实现**：将 `run-loop.sh` 逻辑翻译为 Temporal Workflow
+- **适合**：企业级部署，需要 SLA 保障
+
+### 迁移建议
+
+1. **先保持文件协议**：当前项目规模，文件通信足够
+2. **引入 `PROJECT_DIR` 配置**：已在 `run-loop.sh` 中支持 `--project` 参数
+3. **MAX_ITER 可配置**：通过 `--max-iter N` 或 `MAX_ITER` 环境变量调整
+4. **结构保持**：无论后端是文件/Redis/Temporal，`loop-plan.md`、`loop-builder-output.md`、`loop-review-result.md` 的语义不变
+5. **安全**：始终从 `LLM_API_KEY` 环境变量读取密钥，不传命令行参数

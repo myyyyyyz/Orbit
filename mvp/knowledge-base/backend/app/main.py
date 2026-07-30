@@ -2,12 +2,18 @@ import os
 import uuid
 import json
 import urllib.request
+import logging
 from typing import Optional, Any
 import copy
-from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Body
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Body, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from .config import settings, RAGStrategy
+from .schemas.strategy import StrategyPatch, _apply_section
 from .ingest import parse_file, get_file_type, SUPPORTED_TYPES
 from .chunk import chunk_text
 from .store import add_documents, delete_by_source, get_stats
@@ -20,30 +26,102 @@ from .storage_router import route_storage, get_strategy_info, detect_content_typ
 from .multitenant import register_user, login_user, get_user_by_id, get_user_collection, save_session, get_session, get_latest_session, init_db as init_tenant_db
 from .memory import init_memory_db, save_user_profile, get_user_profile, save_project_context, get_latest_project, save_conversation_summary, get_recent_summaries, restore_context
 from .onboarding import get_onboarding_template, get_role_config, get_all_roles
+from .middleware.auth import get_current_user, get_optional_user, create_access_token
+from .middleware.request_id import RequestIDMiddleware
+from .embed import preload_model
+
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期：启动时预热 Embedding 模型"""
+    logger.info("Knowledge Base Service starting...")
+    try:
+        preload_model()
+    except Exception:
+        logger.warning("Embedding model preload failed, will load on first request", exc_info=True)
+    yield
+    logger.info("Knowledge Base Service shutting down...")
+
 
 app = FastAPI(
     title="Knowledge Base Service",
     description="知识库服务 — 文档上传、向量化、语义检索",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
+# Rate Limiter
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# X-Request-ID — 全链路请求追踪
+app.add_middleware(RequestIDMiddleware)
+
+# CORS — 从环境变量读取，默认仅允许本地开发
+_CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:8000")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=[o.strip() for o in _CORS_ORIGINS.split(",") if o.strip()],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "knowledge-base"}
+    """深度健康检查：验证 ChromaDB、SQLite、LLM API 连通性"""
+    checks = {"service": "knowledge-base"}
+
+    # 1. ChromaDB 连通性
+    try:
+        from .store import get_client
+        client = get_client()
+        client.heartbeat()
+        checks["chromadb"] = "ok"
+    except Exception as e:
+        checks["chromadb"] = f"unhealthy: {str(e)[:100]}"
+
+    # 2. SQLite 连通性
+    try:
+        from .multitenant import _get_db
+        conn = _get_db()
+        conn.execute("SELECT 1")
+        conn.close()
+        checks["sqlite"] = "ok"
+    except Exception as e:
+        checks["sqlite"] = f"unhealthy: {str(e)[:100]}"
+
+    # 3. LLM API 可达性（可选，有 key 才检查）
+    try:
+        api_key = os.getenv("LLM_API_KEY", "")
+        if api_key:
+            base_url = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1/chat/completions")
+            # 用 HEAD 请求轻量检查可达性
+            head_req = urllib.request.Request(base_url, method="HEAD")
+            urllib.request.urlopen(head_req, timeout=5)
+            checks["llm_api"] = "ok"
+        else:
+            checks["llm_api"] = "skipped (no API key)"
+    except Exception as e:
+        checks["llm_api"] = f"unreachable: {str(e)[:100]}"
+
+    all_healthy = all(
+        v == "ok" or v.startswith("skipped")
+        for v in [checks.get("chromadb", ""), checks.get("sqlite", ""), checks.get("llm_api", "")]
+    )
+    checks["status"] = "ok" if all_healthy else "degraded"
+
+    return checks
 
 
 @app.get("/api/knowledge/stats")
-def api_stats():
-    """获取知识库统计"""
-    return get_stats()
+def api_stats(current_user: Optional[dict] = Depends(get_optional_user)):
+    """获取知识库统计（已登录用户看自己的 Collection）"""
+    user_id = current_user["user_id"] if current_user else None
+    return get_stats(user_id)
 
 
 @app.get("/api/knowledge/supported-types")
@@ -53,24 +131,28 @@ def api_supported_types():
 
 
 @app.post("/api/knowledge/upload")
-async def api_upload(file: UploadFile = File(...)):
-    """上传并索引文档"""
+async def api_upload(file: UploadFile = File(...), current_user: Optional[dict] = Depends(get_optional_user)):
+    """上传并索引文档（已登录用户写入专属 Collection）"""
     # 验证文件类型
     if not file.filename:
         raise HTTPException(400, "文件名不能为空")
     if not get_file_type(file.filename):
         raise HTTPException(400, f"不支持的文件类型，支持: {list(SUPPORTED_TYPES.keys())}")
 
-    # 保存文件
-    filename = f"{uuid.uuid4().hex}_{file.filename}"
+    # 路径安全：basename 过滤防路径穿越
+    safe_filename = os.path.basename(file.filename)
+    if not safe_filename or safe_filename in (".", ".."):
+        raise HTTPException(400, "文件名非法")
+    filename = f"{uuid.uuid4().hex}_{safe_filename}"
     filepath = os.path.join(settings.UPLOAD_DIR, filename)
 
     content = await file.read()
     if len(content) > settings.MAX_FILE_SIZE:
         raise HTTPException(400, f"文件超过 {settings.MAX_FILE_SIZE // 1024 // 1024}MB 限制")
 
-    with open(filepath, "wb") as f:
-        f.write(content)
+    import aiofiles
+    async with aiofiles.open(filepath, "wb") as f:
+        await f.write(content)
 
     # 解析文件
     try:
@@ -83,7 +165,7 @@ async def api_upload(file: UploadFile = File(...)):
 
     # 切割
     chunks = chunk_text(text, metadata={
-        "source": file.filename,
+        "source": safe_filename,
         "file_type": file_type,
         "char_count": len(text),
     })
@@ -91,16 +173,18 @@ async def api_upload(file: UploadFile = File(...)):
     if not chunks:
         raise HTTPException(500, "文本切割失败")
 
-    # 入库
-    count = add_documents(chunks)
+    # 入库（按用户隔离）
+    user_id = current_user["user_id"] if current_user else None
+    count = add_documents(chunks, user_id)
 
     return {
         "status": "ok",
-        "filename": file.filename,
+        "filename": safe_filename,
         "file_type": file_type,
         "char_count": len(text),
         "chunks": count,
-        "message": f"已索引 {file.filename}（{count} 个片段）",
+        "user_scoped": user_id is not None,
+        "message": f"已索引 {safe_filename}（{count} 个片段）",
     }
 
 
@@ -108,8 +192,9 @@ async def api_upload(file: UploadFile = File(...)):
 async def api_upload_text(
     text: str = Query(..., description="要索引的文本内容"),
     source: str = Query("manual", description="来源标识"),
+    current_user: Optional[dict] = Depends(get_optional_user),
 ):
-    """直接上传文本内容进行索引"""
+    """直接上传文本内容进行索引（已登录用户写入专属 Collection）"""
     if not text or not text.strip():
         raise HTTPException(400, "文本内容不能为空")
 
@@ -119,12 +204,14 @@ async def api_upload_text(
         "char_count": len(text),
     })
 
-    count = add_documents(chunks)
+    user_id = current_user["user_id"] if current_user else None
+    count = add_documents(chunks, user_id)
     return {
         "status": "ok",
         "source": source,
         "char_count": len(text),
         "chunks": count,
+        "user_scoped": user_id is not None,
         "message": f"已索引（{count} 个片段）",
     }
 
@@ -134,17 +221,23 @@ def api_search(
     q: str = Query(..., description="搜索查询"),
     top_k: int = Query(None, description="返回结果数"),
     format: str = Query("json", description="返回格式: json | text"),
+    current_user: Optional[dict] = Depends(get_optional_user),
 ):
-    """语义搜索知识库"""
+    """语义搜索知识库（已登录用户搜索自己的 Collection）"""
+    user_id = current_user["user_id"] if current_user else None
     if format == "text":
-        return {"results": search_formatted(q, top_k)}
-    return {"query": q, "results": search(q, top_k)}
+        return {"results": search_formatted(q, top_k, user_id)}
+    return {"query": q, "results": search(q, top_k, user_id)}
 
 
 @app.delete("/api/knowledge/source")
-def api_delete_source(source: str = Query(..., description="要删除的文档来源名称")):
+def api_delete_source(
+    source: str = Query(..., description="要删除的文档来源名称"),
+    current_user: Optional[dict] = Depends(get_optional_user),
+):
     """删除指定来源的所有索引"""
-    delete_by_source(source)
+    user_id = current_user["user_id"] if current_user else None
+    delete_by_source(source, user_id)
     return {"status": "ok", "source": source, "message": f"已删除 {source} 的索引"}
 
 
@@ -152,12 +245,14 @@ def api_delete_source(source: str = Query(..., description="要删除的文档�
 def api_context(
     q: str = Query(..., description="搜索查询"),
     top_k: int = Query(None, description="返回结果数"),
+    current_user: Optional[dict] = Depends(get_optional_user),
 ):
     """
     获取格式化的知识库上下文，可直接注入 Agent。
     这是 Agent Loop 的主要接口。
     """
-    return {"context": search_formatted(q, top_k)}
+    user_id = current_user["user_id"] if current_user else None
+    return {"context": search_formatted(q, top_k, user_id)}
 
 
 # ================================================================
@@ -165,19 +260,22 @@ def api_context(
 # ================================================================
 
 @app.post("/api/knowledge/ask")
-def api_ask(body: dict = Body(...)):
+def api_ask(body: dict = Body(...), current_user: Optional[dict] = Depends(get_optional_user)):
     """
     RAG 完整闭环：用户问题 → 缓存检查 → 检索 → 模型路由 → LLM 生成 → 带引用返回
 
     P3 增强：
     - 语义缓存（相似查询直接返回）
     - 模型路由（简单→快模型，复杂→强模型）
+    P0 增强：
+    - 租户隔离（已登录用户搜索自己的 Collection）
     """
     question = body.get("question", "").strip()
     if not question:
         raise HTTPException(400, "问题不能为空")
 
     top_k = body.get("top_k") or settings.rag.retrieval.top_k
+    user_id = current_user["user_id"] if current_user else None
 
     # ── P3: 语义缓存检查 ──
     cached = cache_get(question)
@@ -193,7 +291,7 @@ def api_ask(body: dict = Body(...)):
         }
 
     # ── 检索 ──
-    chunks = search(question, top_k)
+    chunks = search(question, top_k, user_id)
     if not chunks:
         return {
             "question": question,
@@ -208,16 +306,23 @@ def api_ask(body: dict = Body(...)):
     scores = [c["score"] for c in chunks]
     route = route_model(question, scores)
 
+    # 如果路由判定需要追问，直接返回而不调 LLM
+    if route.needs_clarification:
+        return {
+            "question": question,
+            "answer": route.clarification_question,
+            "sources": [],
+            "model": "router",
+            "retrieval_count": len(chunks),
+            "cache_hit": False,
+            "router_tier": route.tier,
+            "router_reason": route.reason,
+            "needs_clarification": True,
+        }
+
     # ── 生成（使用路由选择的模型）──
-    # 临时覆盖 LLM 模型
-    original_model = os.getenv("LLM_MODEL", "")
-    os.environ["LLM_MODEL"] = route["model"]
-
-    result = generate_answer(question, chunks, body.get("history", []))
-
-    # 恢复
-    if original_model:
-        os.environ["LLM_MODEL"] = original_model
+    # 直接传 model 参数，避免 os.environ 并发竞态条件
+    result = generate_answer(question, chunks, body.get("history", []), model=route.model)
 
     # ── P3: 存入缓存 ──
     cache_put(question, result["answer"], result["sources"], result["model"])
@@ -229,8 +334,8 @@ def api_ask(body: dict = Body(...)):
         "model": result["model"],
         "retrieval_count": result["context_count"],
         "cache_hit": False,
-        "router_tier": route["tier"],
-        "router_reason": route["reason"],
+        "router_tier": route.tier,
+        "router_reason": route.reason,
     }
 
 
@@ -242,6 +347,7 @@ def api_ask(body: dict = Body(...)):
 def api_ask_stream(
     q: str = Query(..., description="用户问题"),
     top_k: int = Query(None, description="检索结果数"),
+    current_user: Optional[dict] = Depends(get_optional_user),
 ):
     """
     流式 RAG 问答（SSE）。
@@ -254,8 +360,9 @@ def api_ask_stream(
     - done: 完成
     - error: 错误
     """
+    user_id = current_user["user_id"] if current_user else None
     return StreamingResponse(
-        stream_ask(q, top_k),
+        stream_ask(q, top_k, user_id=user_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -303,9 +410,12 @@ def api_router_predict(body: dict = Body(...)):
     return {
         "query": query,
         "intent": intent,
-        "tier": route["tier"],
-        "model": route["model"],
-        "reason": route["reason"],
+        "tier": route.tier,
+        "model": route.model,
+        "reason": route.reason,
+        "confidence": route.confidence,
+        "needs_clarification": route.needs_clarification,
+        "clarification_question": route.clarification_question if route.needs_clarification else "",
     }
 
 
@@ -368,7 +478,8 @@ def api_logos_summarize(body: dict = Body(...)):
             with urllib.request.urlopen(req, timeout=30) as resp:
                 result = json.loads(resp.read())
                 summary = result["choices"][0]["message"]["content"]
-        except:
+        except Exception:
+            logger.warning("Logos 总结 LLM 调用失败，降级为原始记录", exc_info=True)
             summary = f"### 对话总结（LLM 不可用，原始记录）\n\n{conversation[:500]}"
     else:
         summary = f"### 对话总结（无 LLM，原始记录）\n\n{conversation[:500]}"
@@ -451,64 +562,17 @@ def _strategy_to_dict() -> dict:
 
 
 def _apply_strategy_patch(strategy: RAGStrategy, patch: dict):
-    """将 patch dict 应用到 strategy 对象"""
-    if "chunk" in patch:
-        c = patch["chunk"]
-        if "method" in c and c["method"] in ("semantic", "fixed_size"):
-            strategy.chunk.method = c["method"]
-        if "size" in c and isinstance(c["size"], int) and 100 <= c["size"] <= 5000:
-            strategy.chunk.size = c["size"]
-        if "overlap" in c and isinstance(c["overlap"], int) and 0 <= c["overlap"] <= 1000:
-            strategy.chunk.overlap = c["overlap"]
-        if "parent_child_enabled" in c and isinstance(c["parent_child_enabled"], bool):
-            strategy.chunk.parent_child_enabled = c["parent_child_enabled"]
-        if "parent_size" in c and isinstance(c["parent_size"], int):
-            strategy.chunk.parent_size = c["parent_size"]
-        if "min_size" in c and isinstance(c["min_size"], int):
-            strategy.chunk.min_size = c["min_size"]
-        if "table_preserve" in c and isinstance(c["table_preserve"], bool):
-            strategy.chunk.table_preserve = c["table_preserve"]
-
-    if "embed" in patch:
-        e = patch["embed"]
-        if "backend" in e and e["backend"] in ("sentence-transformers", "ollama", "openai"):
-            strategy.embed.backend = e["backend"]
-        if "model" in e and isinstance(e["model"], str):
-            strategy.embed.model = e["model"]
-        if "normalize" in e and isinstance(e["normalize"], bool):
-            strategy.embed.normalize = e["normalize"]
-        if "ollama_host" in e and isinstance(e["ollama_host"], str):
-            strategy.embed.ollama_host = e["ollama_host"]
-
-    if "storage" in patch:
-        st = patch["storage"]
-        if "distance_metric" in st and st["distance_metric"] in ("cosine", "l2", "ip"):
-            strategy.storage.distance_metric = st["distance_metric"]
-        if "hnsw_M" in st and isinstance(st["hnsw_M"], int):
-            strategy.storage.hnsw_M = st["hnsw_M"]
-        if "hnsw_ef_construction" in st and isinstance(st["hnsw_ef_construction"], int):
-            strategy.storage.hnsw_ef_construction = st["hnsw_ef_construction"]
-        if "hnsw_ef_search" in st and isinstance(st["hnsw_ef_search"], int):
-            strategy.storage.hnsw_ef_search = st["hnsw_ef_search"]
-
-    if "retrieval" in patch:
-        r = patch["retrieval"]
-        if "method" in r and r["method"] in ("vector", "hybrid", "parent_child"):
-            strategy.retrieval.method = r["method"]
-        if "bm25_weight" in r and isinstance(r["bm25_weight"], (int, float)):
-            strategy.retrieval.bm25_weight = max(0.0, min(1.0, r["bm25_weight"]))
-        if "rerank_enabled" in r and isinstance(r["rerank_enabled"], bool):
-            strategy.retrieval.rerank_enabled = r["rerank_enabled"]
-        if "query_rewrite_enabled" in r and isinstance(r["query_rewrite_enabled"], bool):
-            strategy.retrieval.query_rewrite_enabled = r["query_rewrite_enabled"]
-        if "top_k" in r and isinstance(r["top_k"], int) and 1 <= r["top_k"] <= 100:
-            strategy.retrieval.top_k = r["top_k"]
-        if "multi_hop_enabled" in r and isinstance(r["multi_hop_enabled"], bool):
-            strategy.retrieval.multi_hop_enabled = r["multi_hop_enabled"]
-        if "score_threshold" in r and isinstance(r["score_threshold"], (int, float)):
-            strategy.retrieval.score_threshold = max(0.0, min(1.0, r["score_threshold"]))
-        if "dedup" in r and r["dedup"] in ("none", "exact", "near"):
-            strategy.retrieval.dedup = r["dedup"]
+    """将 patch dict 应用到 strategy 对象（Pydantic 验证 + setattr 反射）"""
+    validated = StrategyPatch(**patch)
+    apply_map = {
+        "chunk": strategy.chunk,
+        "embed": strategy.embed,
+        "storage": strategy.storage,
+        "retrieval": strategy.retrieval,
+    }
+    for section_name, section_patch in validated.model_dump(exclude_unset=True).items():
+        if section_patch is not None and section_name in apply_map:
+            _apply_section(apply_map[section_name], getattr(validated, section_name))
 
 
 @app.get("/api/knowledge/strategy")
@@ -609,8 +673,9 @@ def api_storage_analyze(body: dict = Body(...)):
 # ================================================================
 
 @app.post("/api/auth/register")
-def api_register(body: dict = Body(...)):
-    """注册用户（多租户）"""
+@limiter.limit("5/minute")
+def api_register(request: Request, body: dict = Body(...)):
+    """注册用户（多租户），返回 JWT Token"""
     username = body.get("username", "").strip()
     password = body.get("password", "").strip()
     tenant_id = body.get("tenant_id")
@@ -621,12 +686,23 @@ def api_register(body: dict = Body(...)):
     result = register_user(username, password, tenant_id)
     if "error" in result:
         raise HTTPException(400, result["error"])
-    return result
+
+    # 签发 JWT
+    token = create_access_token(username, result["user_id"], tenant_id)
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user_id": result["user_id"],
+        "username": username,
+        "tenant_id": tenant_id,
+        "collection_name": result["collection_name"],
+    }
 
 
 @app.post("/api/auth/login")
-def api_login(body: dict = Body(...)):
-    """登录（多租户）"""
+@limiter.limit("5/minute")
+def api_login(request: Request, body: dict = Body(...)):
+    """登录（多租户），返回 JWT Token"""
     username = body.get("username", "").strip()
     password = body.get("password", "").strip()
 
@@ -636,13 +712,24 @@ def api_login(body: dict = Body(...)):
     result = login_user(username, password)
     if not result:
         raise HTTPException(401, "用户名或密码错误")
-    return result
+
+    # 签发 JWT
+    token = create_access_token(username, result["user_id"], result.get("tenant_id"))
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user_id": result["user_id"],
+        "username": username,
+        "role": result.get("role"),
+        "tenant_id": result.get("tenant_id"),
+        "collection_name": result["collection_name"],
+    }
 
 
-@app.get("/api/auth/me/{user_id}")
-def api_me(user_id: int):
-    """获取用户信息"""
-    user = get_user_by_id(user_id)
+@app.get("/api/auth/me")
+def api_me(current_user: dict = Depends(get_current_user)):
+    """获取当前用户信息（从 JWT Token 提取）"""
+    user = get_user_by_id(current_user["user_id"])
     if not user:
         raise HTTPException(404, "用户不存在")
     return {
@@ -650,7 +737,7 @@ def api_me(user_id: int):
         "username": user["username"],
         "role": user["role"],
         "tenant_id": user["tenant_id"],
-        "collection_name": get_user_collection(user_id),
+        "collection_name": get_user_collection(current_user["user_id"]),
     }
 
 
@@ -659,13 +746,10 @@ def api_me(user_id: int):
 # ================================================================
 
 @app.post("/api/memory/profile")
-def api_save_profile(body: dict = Body(...)):
-    """保存用户画像"""
-    user_id = body.get("user_id")
-    if not user_id:
-        raise HTTPException(400, "user_id 不能为空")
+def api_save_profile(body: dict = Body(...), current_user: dict = Depends(get_current_user)):
+    """保存用户画像（user_id 从 JWT 提取）"""
     save_user_profile(
-        user_id,
+        current_user["user_id"],
         role=body.get("role"),
         preferences=body.get("preferences"),
         common_skills=body.get("common_skills"),
@@ -674,24 +758,23 @@ def api_save_profile(body: dict = Body(...)):
     return {"status": "ok", "message": "用户画像已保存"}
 
 
-@app.get("/api/memory/profile/{user_id}")
-def api_get_profile(user_id: int):
-    """获取用户画像"""
-    profile = get_user_profile(user_id)
+@app.get("/api/memory/profile")
+def api_get_profile(current_user: dict = Depends(get_current_user)):
+    """获取当前用户的画像"""
+    profile = get_user_profile(current_user["user_id"])
     if not profile:
         raise HTTPException(404, "用户画像不存在")
     return profile
 
 
 @app.post("/api/memory/project")
-def api_save_project(body: dict = Body(...)):
-    """保存项目上下文"""
-    user_id = body.get("user_id")
+def api_save_project(body: dict = Body(...), current_user: dict = Depends(get_current_user)):
+    """保存项目上下文（user_id 从 JWT 提取）"""
     project_name = body.get("project_name")
-    if not user_id or not project_name:
-        raise HTTPException(400, "user_id 和 project_name 不能为空")
+    if not project_name:
+        raise HTTPException(400, "project_name 不能为空")
     save_project_context(
-        user_id,
+        current_user["user_id"],
         project_name,
         tech_stack=body.get("tech_stack"),
         current_progress=body.get("current_progress"),
@@ -701,23 +784,22 @@ def api_save_project(body: dict = Body(...)):
 
 
 @app.post("/api/memory/summary")
-def api_save_summary(body: dict = Body(...)):
-    """保存对话摘要"""
-    user_id = body.get("user_id")
+def api_save_summary(body: dict = Body(...), current_user: dict = Depends(get_current_user)):
+    """保存对话摘要（user_id 从 JWT 提取）"""
     summary = body.get("summary")
-    if not user_id or not summary:
-        raise HTTPException(400, "user_id 和 summary 不能为空")
-    save_conversation_summary(user_id, summary, body.get("key_points"))
+    if not summary:
+        raise HTTPException(400, "summary 不能为空")
+    save_conversation_summary(current_user["user_id"], summary, body.get("key_points"))
     return {"status": "ok", "message": "对话摘要已保存"}
 
 
-@app.get("/api/memory/restore/{user_id}")
-def api_restore_context(user_id: int):
+@app.get("/api/memory/restore")
+def api_restore_context(current_user: dict = Depends(get_current_user)):
     """
     跨会话上下文恢复。
     用户打开聊天时调用，返回完整的上下文快照。
     """
-    return restore_context(user_id)
+    return restore_context(current_user["user_id"])
 
 
 # ================================================================

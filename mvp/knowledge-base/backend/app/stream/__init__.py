@@ -16,10 +16,13 @@ from ..cache import get as cache_get, put as cache_put
 from ..embed import encode
 
 
-def stream_ask(question: str, top_k: int = None):
+def stream_ask(question: str, top_k: int = None, user_id: int = None):
     """
     流式 RAG 问答生成器。
     yield SSE 格式的数据。
+
+    参数:
+        user_id: 可选，已登录用户的 ID，用于租户隔离检索。
     """
     if top_k is None:
         top_k = settings.rag.retrieval.top_k
@@ -42,7 +45,7 @@ def stream_ask(question: str, top_k: int = None):
 
     # ── Event 3: 检索 ──
     yield _sse("status", {"stage": "retrieving", "top_k": top_k})
-    chunks = search(question, top_k)
+    chunks = search(question, top_k, user_id)
 
     if not chunks:
         yield _sse("answer", {"text": "知识库中未找到相关内容。", "sources": [], "model": "none"})
@@ -60,9 +63,11 @@ def stream_ask(question: str, top_k: int = None):
     route = route_model(question, scores)
     yield _sse("status", {
         "stage": "routing",
-        "tier": route["tier"],
-        "model": route["model"],
-        "reason": route["reason"],
+        "tier": route.tier,
+        "model": route.model,
+        "reason": route.reason,
+        "confidence": route.confidence,
+        "needs_clarification": route.needs_clarification,
     })
 
     # ── Event 5: 生成（流式）──
@@ -93,13 +98,13 @@ def stream_ask(question: str, top_k: int = None):
     user_message = f"## 检索结果\n\n{context_text}\n\n---\n\n## 问题\n\n{question}"
 
     payload = json.dumps({
-        "model": route["model"],
+        "model": route.model,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},
         ],
-        "temperature": route["temperature"],
-        "max_tokens": route["max_tokens"],
+        "temperature": route.temperature,
+        "max_tokens": route.max_tokens,
         "stream": True,  # 启用流式
     }).encode()
 
@@ -134,11 +139,11 @@ def stream_ask(question: str, top_k: int = None):
                     continue
 
         # 存入缓存
-        cache_put(question, full_answer, sources, route["model"])
+        cache_put(question, full_answer, sources, route.model)
 
         yield _sse("sources", {"sources": sources})
         yield _sse("done", {
-            "model": route["model"],
+            "model": route.model,
             "retrieval_count": len(chunks),
             "cached": False,
             "answer_length": len(full_answer),
@@ -146,7 +151,7 @@ def stream_ask(question: str, top_k: int = None):
 
     except Exception as e:
         yield _sse("error", {"message": str(e)})
-        yield _sse("done", {"model": route["model"], "error": True})
+        yield _sse("done", {"model": route.model, "error": True})
 
 
 def _sse(event: str, data: dict) -> str:

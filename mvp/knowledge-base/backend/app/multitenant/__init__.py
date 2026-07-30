@@ -2,23 +2,35 @@
 多用户/企业隔离模块
 
 每个用户/租户拥有独立的知识库 collection，数据互不可见。
-- 认证：JWT Token（复用 lovediary 的 auth 模式）
+- 认证：JWT Token + bcrypt 密码哈希
 - 隔离：ChromaDB collection 按用户隔离（user_{user_id}）
 - 权限：read / write / admin 三级
 """
 
-import hashlib
-import secrets
 import json
 import sqlite3
 import os
 from typing import Optional
-from datetime import datetime
+from urllib.parse import urlparse
+
+import secrets
+
+import bcrypt
+from ..config import settings
 
 
 # ── 用户数据库 ────────────────────────────────────
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "multitenant.db")
+def _resolve_db_path() -> str:
+    """从 DATABASE_URL 解析 SQLite 文件路径（预留 PostgreSQL 升级路径）"""
+    db_url = settings.DATABASE_URL
+    if db_url.startswith("sqlite:///"):
+        return db_url[len("sqlite:///"):]
+    # 未来: if db_url.startswith("postgresql://") → asyncpg
+    raise ValueError(f"不支持的数据库 URL scheme: {db_url}")
+
+
+DB_PATH = _resolve_db_path()
 
 
 def _get_db():
@@ -62,14 +74,18 @@ def init_db():
     conn.close()
 
 
+# ── 密码哈希（bcrypt）──────────────────────────────
+
 def _hash_password(password: str) -> str:
-    salt = secrets.token_hex(16)
-    return salt + ":" + hashlib.sha256((password + salt).encode()).hexdigest()
+    """bcrypt 哈希（自动加随机盐，work_factor=12）"""
+    # 截断到 72 字节（bcrypt 固有限制）
+    password_bytes = password.encode("utf-8")[:72]
+    return bcrypt.hashpw(password_bytes, bcrypt.gensalt(rounds=12)).decode("utf-8")
 
 
 def _verify_password(password: str, stored: str) -> bool:
-    salt, hash_val = stored.split(":", 1)
-    return hashlib.sha256((password + salt).encode()).hexdigest() == hash_val
+    """bcrypt 验证"""
+    return bcrypt.checkpw(password.encode("utf-8"), stored.encode("utf-8"))
 
 
 # ── 用户管理 ──────────────────────────────────────

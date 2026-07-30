@@ -34,7 +34,6 @@ while [[ $# -gt 0 ]]; do
     --model) MODEL="$2"; shift 2 ;;
     --base-url) BASE_URL="$2"; shift 2 ;;
     --project) PROJECT_DIR="$2"; shift 2 ;;
-    --key) API_KEY="$2"; shift 2 ;;
     --checkpoint) CHECKPOINT_INTERVAL="$2"; shift 2 ;;
     --max-iter) MAX_ITER="$2"; shift 2 ;;
     *) echo "Unknown: $1"; exit 1 ;;
@@ -43,7 +42,7 @@ done
 
 # ---- Validate ----
 if [[ -z "$API_KEY" ]]; then
-  echo "❌ 需要 API Key。设置 LLM_API_KEY 环境变量或 --key 参数。"
+  echo "❌ 需要 API Key。请设置 LLM_API_KEY 环境变量。"
   echo "   export LLM_API_KEY=sk-xxx"
   exit 1
 fi
@@ -87,46 +86,118 @@ call_llm() {
   local user_context="$2"    # 上下文（plan / output / state 等）
   local output_file="$3"     # 写到哪个文件
 
-  info "正在调用 $API ($MODEL)..."
+  local max_retries=3
+  local retry_delays=(1 2 4)  # 指数退避秒数
+  local attempt=0
 
-  local payload
-  if [[ "$API_TYPE" == "anthropic" ]]; then
-    payload=$(jq -n \
-      --arg model "$MODEL" \
-      --arg system "$system_prompt" \
-      --arg user "$user_context" \
-      '{
-        model: $model,
-        system: $system,
-        messages: [{role: "user", content: $user}],
-        max_tokens: 64000
-      }')
+  while [[ $attempt -lt $max_retries ]]; do
+    info "正在调用 $API ($MODEL)... (attempt $((attempt + 1))/$max_retries)"
 
-    curl -s -X POST "$API_URL" \
-      -H "x-api-key: $API_KEY" \
-      -H "anthropic-version: 2023-06-01" \
-      -H "content-type: application/json" \
-      -d "$payload" \
-      | jq -r '.content[0].text // .error.message // "ERROR: empty response"'
-  else
-    payload=$(jq -n \
-      --arg model "$MODEL" \
-      --arg system "$system_prompt" \
-      --arg user "$user_context" \
-      '{
-        model: $model,
-        messages: [
-          {role: "system", content: $system},
-          {role: "user", content: $user}
-        ]
-      }')
+    local payload
+    local response
+    local http_code
+    local curl_exit=0
 
-    curl -s -X POST "$API_URL" \
-      -H "Authorization: Bearer $API_KEY" \
-      -H "content-type: application/json" \
-      -d "$payload" \
-      | jq -r '.choices[0].message.content // .error.message // "ERROR: empty response"'
-  fi
+    if [[ "$API_TYPE" == "anthropic" ]]; then
+      payload=$(jq -n \
+        --arg model "$MODEL" \
+        --arg system "$system_prompt" \
+        --arg user "$user_context" \
+        '{
+          model: $model,
+          system: $system,
+          messages: [{role: "user", content: $user}],
+          max_tokens: 64000
+        }')
+
+      # 写临时文件以获取 HTTP 状态码
+      local tmp_resp="/tmp/orbit_llm_resp_$$"
+      http_code=$(curl -s -w "%{http_code}" -o "$tmp_resp" \
+        --connect-timeout 15 --max-time 120 \
+        -X POST "$API_URL" \
+        -H "x-api-key: $API_KEY" \
+        -H "anthropic-version: 2023-06-01" \
+        -H "content-type: application/json" \
+        -d "$payload") || curl_exit=$?
+
+      if [[ $curl_exit -ne 0 ]]; then
+        warn "LLM 调用网络错误 (curl exit=$curl_exit)，将重试..."
+        attempt=$((attempt + 1))
+        [[ $attempt -lt $max_retries ]] && sleep "${retry_delays[$((attempt - 1))]}"
+        continue
+      fi
+
+      # 4xx 错误不重试（认证/参数问题）
+      if [[ "$http_code" =~ ^4[0-9][0-9]$ ]]; then
+        fail "LLM API 返回 4xx ($http_code)，不重试"
+        jq -r '.error.message // "HTTP '"$http_code"'"' "$tmp_resp" 2>/dev/null || echo "HTTP $http_code"
+        rm -f "$tmp_resp"
+        return 1
+      fi
+
+      # 5xx 或空响应可重试
+      if [[ "$http_code" =~ ^5[0-9][0-9]$ ]] || [[ "$http_code" == "000" ]]; then
+        warn "LLM API 返回 $http_code，将重试..."
+        attempt=$((attempt + 1))
+        [[ $attempt -lt $max_retries ]] && sleep "${retry_delays[$((attempt - 1))]}"
+        continue
+      fi
+
+      jq -r '.content[0].text // .error.message // "ERROR: empty response"' "$tmp_resp"
+      rm -f "$tmp_resp"
+      return 0
+    else
+      payload=$(jq -n \
+        --arg model "$MODEL" \
+        --arg system "$system_prompt" \
+        --arg user "$user_context" \
+        '{
+          model: $model,
+          messages: [
+            {role: "system", content: $system},
+            {role: "user", content: $user}
+          ]
+        }')
+
+      local tmp_resp="/tmp/orbit_llm_resp_$$"
+      http_code=$(curl -s -w "%{http_code}" -o "$tmp_resp" \
+        --connect-timeout 15 --max-time 120 \
+        -X POST "$API_URL" \
+        -H "Authorization: Bearer $API_KEY" \
+        -H "content-type: application/json" \
+        -d "$payload") || curl_exit=$?
+
+      if [[ $curl_exit -ne 0 ]]; then
+        warn "LLM 调用网络错误 (curl exit=$curl_exit)，将重试..."
+        attempt=$((attempt + 1))
+        [[ $attempt -lt $max_retries ]] && sleep "${retry_delays[$((attempt - 1))]}"
+        continue
+      fi
+
+      # 4xx 错误不重试
+      if [[ "$http_code" =~ ^4[0-9][0-9]$ ]]; then
+        fail "LLM API 返回 4xx ($http_code)，不重试"
+        jq -r '.error.message // "HTTP '"$http_code"'"' "$tmp_resp" 2>/dev/null || echo "HTTP $http_code"
+        rm -f "$tmp_resp"
+        return 1
+      fi
+
+      # 5xx 或空响应可重试
+      if [[ "$http_code" =~ ^5[0-9][0-9]$ ]] || [[ "$http_code" == "000" ]]; then
+        warn "LLM API 返回 $http_code，将重试..."
+        attempt=$((attempt + 1))
+        [[ $attempt -lt $max_retries ]] && sleep "${retry_delays[$((attempt - 1))]}"
+        continue
+      fi
+
+      jq -r '.choices[0].message.content // .error.message // "ERROR: empty response"' "$tmp_resp"
+      rm -f "$tmp_resp"
+      return 0
+    fi
+  done
+
+  fail "LLM 调用失败：已达最大重试次数 ($max_retries)"
+  return 1
 }
 
 # ================================================================
@@ -271,6 +342,59 @@ EOF
       call_llm "$builder_prompt" "$builder_context" "$MEMORY_DIR/loop-builder-output.md" \
         > "$MEMORY_DIR/loop-builder-output.md"
       ok "Builder 输出已写入 $MEMORY_DIR/loop-builder-output.md"
+
+      # ============================================================
+      # Step 2.5: Builder Code Execution (P1 增强)
+      # ============================================================
+      # 从 Builder 输出提取 diff 代码块并尝试应用到项目目录
+      info "Executing Builder output..."
+      local exec_result=""
+      local exec_success=false
+      local project_dir="$PROJECT_DIR"  # 可通过 --project 参数指定
+
+      # 提取 ```diff 代码块
+      local diff_blocks
+      diff_blocks=$(grep -n '```diff' "$MEMORY_DIR/loop-builder-output.md" 2>/dev/null || true)
+
+      if [[ -n "$diff_blocks" && -d "$project_dir" ]]; then
+        # 在项目目录创建临时分支并应用 diff
+        local exec_tmp="/tmp/orbit_exec_$$"
+        mkdir -p "$exec_tmp"
+
+        # 提取所有 diff 代码块到一个文件
+        python3 -c "
+import re, sys
+with open('$MEMORY_DIR/loop-builder-output.md') as f:
+    content = f.read()
+blocks = re.findall(r'\`\`\`diff\n(.*?)\`\`\`', content, re.DOTALL)
+with open('$exec_tmp/builder.diff', 'w') as out:
+    out.write('\n'.join(blocks))
+print(f'Extracted {len(blocks)} diff block(s)')
+" > "$exec_tmp/extract.log" 2>&1
+
+        ok "提取结果: $(cat "$exec_tmp/extract.log")"
+
+        # 尝试在项目目录应用 diff
+        if [[ -f "$exec_tmp/builder.diff" ]]; then
+          if (cd "$project_dir" && git apply --check "$exec_tmp/builder.diff" 2>"$exec_tmp/check.log"); then
+            ok "Diff 格式验证通过，应用变更..."
+            (cd "$project_dir" && git apply "$exec_tmp/builder.diff" 2>&1) && exec_success=true
+          else
+            warn "Diff 格式不兼容 git apply（可能为示意性代码块），跳过自动执行"
+            cat "$exec_tmp/check.log" | head -3 | while read line; do warn "  $line"; done
+          fi
+        fi
+        rm -rf "$exec_tmp"
+      else
+        warn "未找到 diff 代码块或项目目录不存在，跳过自动执行"
+      fi
+
+      # 写入执行日志
+      exec_result="## Builder Code Execution Log\n\n"
+      exec_result+="- **Diff blocks found**: $([[ -n "$diff_blocks" ]] && echo 'yes' || echo 'no')\n"
+      exec_result+="- **Auto-applied**: $([[ "$exec_success" == true ]] && echo 'yes' || echo 'no')\n"
+      exec_result+="- **Executor**: run-loop.sh Step 2.5 (git apply + dry-run)\n"
+      echo -e "\n$exec_result" >> "$MEMORY_DIR/loop-builder-output.md"
 
       # ============================================================
       # Step 3: Spawn Reviewer
