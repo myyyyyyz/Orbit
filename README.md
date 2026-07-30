@@ -155,6 +155,8 @@ Orbit/
 │   │   │       ├── multitenant/       # 多用户隔离
 │   │   │       ├── memory/            # 长期记忆
 │   │   │       ├── onboarding/        # 新手引导
+│   │   │       ├── middleware/         # 中间件（鉴权 / 请求追踪）
+│   │   │       ├── schemas/            # Pydantic 数据模型
 │   │   │       ├── config.py          # RAG 策略配置
 │   │   │       └── main.py            # 25+ API 端点
 │   │   ├── demo-docs/                 # 10 份示例文档
@@ -220,7 +222,8 @@ python3 demo_p4.py   # P4: 新手引导 → 混合存储 → 多用户 → 长�
 ```bash
 cd "agent loop"
 export LLM_API_KEY=sk-xxx
-./run-loop.sh --api openai --model gpt-4o
+export LLM_MODEL=gpt-4o
+./run-loop.sh
 ```
 
 ## API 端点一览
@@ -229,7 +232,7 @@ export LLM_API_KEY=sk-xxx
 
 | 端点 | 方法 | 功能 |
 |------|------|------|
-| `/health` | GET | 健康检查 |
+| `/health` | GET | 深度健康检查（ChromaDB + SQLite + LLM 可达性） |
 | `/api/knowledge/upload` | POST | 上传文件并索引 |
 | `/api/knowledge/upload-text` | POST | 上传文本索引 |
 | `/api/knowledge/search` | GET | 语义搜索 |
@@ -241,7 +244,7 @@ export LLM_API_KEY=sk-xxx
 
 | 端点 | 方法 | 功能 |
 |------|------|------|
-| `/api/knowledge/ask/stream` | GET | SSE 流式 RAG 问答 |
+| `/api/knowledge/ask/stream` | GET | SSE 流式 RAG 问答（需认证） |
 | `/api/knowledge/cache/stats` | GET | 缓存统计 |
 | `/api/knowledge/cache` | DELETE | 清空缓存 |
 | `/api/knowledge/router/models` | GET | 模型预设 |
@@ -254,8 +257,8 @@ export LLM_API_KEY=sk-xxx
 | `/api/onboarding/template` | GET | 新手引导模板 |
 | `/api/onboarding/roles/{role}` | GET | 角色配置 |
 | `/api/storage/analyze` | POST | 文件 → 存储策略推荐 |
-| `/api/auth/register` | POST | 用户注册（多租户） |
-| `/api/auth/login` | POST | 用户登录 |
+| `/api/auth/register` | POST | 用户注册（多租户，5次/分钟限流） |
+| `/api/auth/login` | POST | 用户登录（5次/分钟限流，防暴力破解） |
 | `/api/memory/profile` | POST | 保存用户画像 |
 | `/api/memory/restore/{user_id}` | GET | 跨会话上下文恢复 |
 
