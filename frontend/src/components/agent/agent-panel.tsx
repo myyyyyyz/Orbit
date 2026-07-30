@@ -4,7 +4,7 @@ import { useState } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import {
   Eye, CheckCircle2, Clock, XCircle, AlertTriangle,
-  ChevronDown, ChevronUp, FileText, Code2, GitBranch, Shield,
+  ChevronDown, ChevronUp, FileText, Code2, Shield,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -13,7 +13,6 @@ type AgentStatus = "idle" | "running" | "completed" | "failed" | "pending";
 interface AgentStep {
   id: string;
   agent: string;
-  icon: typeof Eye;
   status: AgentStatus;
   time?: string;
   detail: string;
@@ -40,24 +39,25 @@ const agentIcons: Record<string, typeof Eye> = {
   user: Eye,
 };
 
+// Phase 2 演示数据 - Phase 3 对接 Agent Loop 文件协议实时获取
 const mockSteps: AgentStep[] = [
   {
-    id: "s1", agent: "Master", icon: Eye, status: "completed", time: "12:03",
+    id: "s1", agent: "Master", status: "completed", time: "12:03",
     detail: "需求对齐完成，输出结构化 Spec",
     expanded: { type: "plan", title: "Master 需求对齐 Spec", content: "## 用户意图\n构建一个用户管理模块\n\n## 功能边界\n- 用户注册/登录\n- 角色权限\n- 个人资料编辑\n\n## 技术约束\n- React + TypeScript\n- RESTful API" }
   },
   {
-    id: "s2", agent: "Planner", icon: FileText, status: "completed", time: "12:05",
+    id: "s2", agent: "Planner", status: "completed", time: "12:05",
     detail: "执行计划产出，3 模块，影响面分析无风险",
     expanded: { type: "plan", title: "Planner 执行计划", content: "## 变更清单\n1. `src/pages/auth/` - 新增登录注册页\n2. `src/components/user/` - 用户资料组件\n3. `src/api/user.ts` - API 封装\n\n## 影响面\n- 路由层：新增 3 条路由\n- 状态层：新增 AuthContext\n- 无破坏性变更" }
   },
   {
-    id: "s3", agent: "Builder", icon: Code2, status: "running", time: "12:07",
+    id: "s3", agent: "Builder", status: "running", time: "12:07",
     detail: "正在执行代码修改...",
     expanded: { type: "code", title: "Builder 代码变更 (进行中)", content: "```tsx\n// src/components/user/ProfileCard.tsx\nexport function ProfileCard({ user }) {\n  return (\n    <Card>\n      <Avatar src={user.avatar} />\n      <h2>{user.name}</h2>\n      <p>{user.bio}</p>\n    </Card>\n  );\n}\n```" }
   },
   {
-    id: "s4", agent: "Reviewer", icon: Shield, status: "pending", time: "-",
+    id: "s4", agent: "Reviewer", status: "pending", time: "-",
     detail: "等待 Builder 完成后开始两阶段审查",
   },
 ];

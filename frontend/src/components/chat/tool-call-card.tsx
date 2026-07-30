@@ -80,7 +80,13 @@ export function ToolCallCard({ call }: ToolCallCardProps) {
                     输入参数
                   </p>
                   <pre className="text-[11px] text-muted font-mono leading-relaxed whitespace-pre-wrap">
-                    {JSON.stringify(call.input, null, 2)}
+                    {(() => {
+                      try {
+                        return JSON.stringify(call.input, null, 2);
+                      } catch {
+                        return String(call.input);
+                      }
+                    })()}
                   </pre>
                 </div>
               )}
