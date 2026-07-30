@@ -86,7 +86,7 @@ export function AgentPanel() {
       <div className="flex-1 overflow-y-auto px-6 py-4">
         {/* Status Summary */}
         <div className="mb-5 grid grid-cols-4 gap-2">
-          {(["completed", "running", "failed", "pending"] as AgentStatus[]).map((s) => {
+          {(Object.keys(statusConfig) as AgentStatus[]).map((s) => {
             const count = mockSteps.filter((step) => step.status === s).length;
             const cfg = statusConfig[s];
             return (

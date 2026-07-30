@@ -48,7 +48,7 @@ export function SourcePopover({ filename, chunk, children }: SourcePopoverProps)
           <p className="text-[11px] text-muted leading-relaxed line-clamp-5">
             {chunk}
           </p>
-          <div className="absolute left-3 top-full -mt-0.5 h-2 w-2 rotate-45 bg-surface-elevated border-r border-b border-border" />
+          <div className="absolute left-3 top-full -mt-0.5 h-2 w-2 rotate-45 bg-surface-elevated border-r border-b border-border z-[51]" />
         </div>
       )}
     </span>
