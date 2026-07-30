@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useMemo, useCallback, type ReactNode } from "react";
 
 interface AuthState {
   token: string | null;
@@ -33,34 +33,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setMounted(true);
   }, []);
 
-  const login = (user: string, t: string) => {
+  const login = useCallback((user: string, t: string) => {
     localStorage.setItem("orbit_token", t);
     localStorage.setItem("orbit_user", user);
     setToken(t);
     setUsername(user);
-  };
+  }, []);
 
-  const logout = () => {
+  const logout = useCallback(() => {
     localStorage.removeItem("orbit_token");
     localStorage.removeItem("orbit_user");
     setToken(null);
     setUsername(null);
-  };
+  }, []);
+
+  const value = useMemo(() => ({
+    token,
+    username,
+    isAuthenticated: !!token,
+    login,
+    logout,
+  }), [token, username, login, logout]);
 
   if (!mounted) {
     return <>{children}</>;
   }
 
   return (
-    <AuthContext.Provider
-      value={{
-        token,
-        username,
-        isAuthenticated: !!token,
-        login,
-        logout,
-      }}
-    >
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );

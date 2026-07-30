@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { Upload, FileText, Search, Trash2, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, formatSize } from "@/lib/utils";
 import { knowledge } from "@/lib/api";
 
 interface DocRecord {
@@ -12,12 +12,35 @@ interface DocRecord {
   uploadedAt?: string;
 }
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
+
 export function KnowledgeBasePanel() {
   const [documents, setDocuments] = useState<DocRecord[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<"idle" | "success" | "error">("idle");
   const [searchQuery, setSearchQuery] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Fetch existing documents on mount
+  useEffect(() => {
+    fetch(`${API_BASE}/api/knowledge/search?q=&top_k=50`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.results) {
+          const seen = new Set<string>();
+          const docs: DocRecord[] = [];
+          for (const r of data.results) {
+            const fn = r.metadata?.filename || "unknown";
+            if (!seen.has(fn)) {
+              seen.add(fn);
+              docs.push({ filename: fn, status: "indexed" });
+            }
+          }
+          setDocuments(docs);
+        }
+      })
+      .catch(() => {/* backend may not support list */});
+  }, []);
 
   const handleUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -30,7 +53,7 @@ export function KnowledgeBasePanel() {
       const res = await knowledge.upload(file);
       setDocuments((prev) => [
         { filename: res.filename, status: res.status, size: file.size, uploadedAt: new Date().toLocaleString() },
-        ...prev,
+        ...prev.filter((d) => d.filename !== res.filename),
       ]);
       setUploadStatus("success");
     } catch {
@@ -43,14 +66,10 @@ export function KnowledgeBasePanel() {
 
   const handleDelete = useCallback((filename: string) => {
     setDocuments((prev) => prev.filter((d) => d.filename !== filename));
+    // Attempt backend delete (best-effort)
+    fetch(`${API_BASE}/api/knowledge/delete?filename=${encodeURIComponent(filename)}`, { method: "DELETE" })
+      .catch(() => {/* may not be supported */});
   }, []);
-
-  const formatSize = (bytes?: number) => {
-    if (!bytes) return "-";
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  };
 
   return (
     <div className="flex h-full flex-col">

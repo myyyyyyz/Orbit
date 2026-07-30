@@ -79,14 +79,14 @@ export const knowledge = {
     onDone?: (model: string) => void,
     onError?: (error: string) => void,
     abortSignal?: AbortSignal
-  ) => {
+  ): Promise<void> => {
     const token = getToken();
     const params = new URLSearchParams({
       q: question,
       top_k: String(topK),
     });
 
-    fetch(`${API_BASE}/api/knowledge/ask/stream?${params}`, {
+    return fetch(`${API_BASE}/api/knowledge/ask/stream?${params}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       signal: abortSignal,
     }).then(async (response) => {
@@ -112,7 +112,7 @@ export const knowledge = {
           if (line.startsWith("data: ")) {
             try {
               const data = JSON.parse(line.slice(6));
-              if (data.stage) continue; // status events
+              if (data.stage) continue;
               if (data.text) onToken?.(data.text);
               if (data.model) onDone?.(data.model);
             } catch {

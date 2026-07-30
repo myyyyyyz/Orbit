@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { Search, FileText, Loader2, ExternalLink } from "lucide-react";
 import { knowledge } from "@/lib/api";
 import { motion, AnimatePresence } from "motion/react";
@@ -16,9 +16,11 @@ export function SearchPanel() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
+  const queryRef = useRef(query);
+  queryRef.current = query;
 
   const handleSearch = useCallback(async () => {
-    const q = query.trim();
+    const q = queryRef.current.trim();
     if (!q) return;
 
     setLoading(true);
@@ -32,7 +34,7 @@ export function SearchPanel() {
     } finally {
       setLoading(false);
     }
-  }, [query]);
+  }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") handleSearch();

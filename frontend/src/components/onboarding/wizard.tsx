@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "motion/react";
 import {
   ChevronRight, ChevronLeft, CheckCircle2,
   Code2, Briefcase, GraduationCap, User, Building2,
+  MessageSquare, BookOpen, Bot,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -60,21 +61,21 @@ export function OnboardingWizard({ onComplete }: WizardProps) {
 
               <div className="space-y-2">
                 <div className="flex items-start gap-3 rounded-lg border border-border/50 bg-surface/30 px-4 py-3">
-                  <MessageIcon className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                  <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
                   <div>
                     <p className="text-sm font-medium">自然语言交互</p>
                     <p className="text-xs text-muted">像和人聊天一样描述你的需求</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-3 rounded-lg border border-border/50 bg-surface/30 px-4 py-3">
-                  <BookIcon className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                  <BookOpen className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
                   <div>
                     <p className="text-sm font-medium">知识库增强</p>
                     <p className="text-xs text-muted">上传文档，AI 基于你的知识回答</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-3 rounded-lg border border-border/50 bg-surface/30 px-4 py-3">
-                  <AgentIcon className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                  <Bot className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
                   <div>
                     <p className="text-sm font-medium">Agent 自动执行</p>
                     <p className="text-xs text-muted">AI 自动规划、编码、审查、交付</p>
@@ -157,28 +158,3 @@ export function OnboardingWizard({ onComplete }: WizardProps) {
   );
 }
 
-function MessageIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
-    </svg>
-  );
-}
-
-function BookIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M4 19.5A2.5 2.5 0 016.5 17H20" />
-      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z" />
-    </svg>
-  );
-}
-
-function AgentIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="3" />
-      <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
-    </svg>
-  );
-}

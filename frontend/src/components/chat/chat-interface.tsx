@@ -86,9 +86,21 @@ export function ChatInterface() {
               <h1 className="text-2xl font-semibold tracking-tight mb-2">
                 有什么我可以帮助你的？
               </h1>
-              <p className="text-sm text-muted leading-relaxed">
-                我可以帮你查询知识库、分析文档、委派 Agent 执行任务，或者只是聊聊天。
+              <p className="text-sm text-muted leading-relaxed mb-4">
+                我可以帮你查询知识库、分析文档、委派 Agent 执行任务。
               </p>
+              <div className="flex flex-wrap justify-center gap-2">
+                {["总结我上传的文档", "这个项目有哪些模块", "帮我规划一个新功能"].map((q) => (
+                  <button
+                    key={q}
+                    onClick={() => handleSend(q)}
+                    className="rounded-full border border-border/60 px-3 py-1.5 text-xs text-muted
+                               hover:border-primary/30 hover:text-foreground transition-colors duration-150 cursor-pointer"
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         ) : (
