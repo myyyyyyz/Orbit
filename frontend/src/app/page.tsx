@@ -1,15 +1,17 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Sidebar } from "@/components/sidebar/sidebar";
 import { ChatInterface } from "@/components/chat/chat-interface";
 import { KnowledgeBasePanel } from "@/components/knowledge-base/kb-panel";
 import { SearchPanel } from "@/components/search/search-panel";
 import { AgentPanel } from "@/components/agent/agent-panel";
 import { SettingsPanel } from "@/components/settings/settings-panel";
+import { StrategyPanel } from "@/components/strategy/strategy-panel";
+import { OnboardingWizard } from "@/components/onboarding/wizard";
 import { motion, AnimatePresence } from "motion/react";
 
-type Tab = "chat" | "knowledge" | "search" | "agent" | "settings";
+type Tab = "chat" | "knowledge" | "search" | "agent" | "strategy" | "settings";
 
 interface Conversation {
   id: string;
@@ -18,8 +20,23 @@ interface Conversation {
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<Tab>("chat");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversation, setActiveConversation] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onboarded = localStorage.getItem("orbit_onboarded");
+    if (!onboarded) {
+      setShowOnboarding(true);
+    }
+  }, []);
+
+  const handleOnboardingComplete = useCallback((role: string) => {
+    localStorage.setItem("orbit_onboarded", "true");
+    localStorage.setItem("orbit_role", role);
+    setShowOnboarding(false);
+  }, []);
 
   const handleNewChat = useCallback(() => {
     const id = `conv-${Date.now()}`;
@@ -32,6 +49,10 @@ export default function Home() {
     setActiveTab("chat");
   }, []);
 
+  if (showOnboarding) {
+    return <OnboardingWizard onComplete={handleOnboardingComplete} />;
+  }
+
   const renderPanel = () => {
     switch (activeTab) {
       case "chat":
@@ -42,6 +63,8 @@ export default function Home() {
         return <SearchPanel key="search" />;
       case "agent":
         return <AgentPanel key="agent" />;
+      case "strategy":
+        return <StrategyPanel key="strategy" />;
       case "settings":
         return <SettingsPanel key="settings" />;
     }
@@ -56,9 +79,11 @@ export default function Home() {
         conversations={conversations}
         activeConversation={activeConversation}
         onSelectConversation={handleSelectConversation}
+        isOpen={sidebarOpen}
+        onToggle={() => setSidebarOpen((o) => !o)}
       />
 
-      <main className="flex-1 overflow-hidden">
+      <main className="flex-1 overflow-hidden md:ml-0">
         <AnimatePresence mode="wait">
           <motion.div
             key={activeTab}
