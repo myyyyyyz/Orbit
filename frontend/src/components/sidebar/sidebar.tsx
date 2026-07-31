@@ -12,6 +12,7 @@ import {
   Sliders,
   Menu,
   X,
+  Trash2,
 } from "lucide-react";
 
 type Tab = "chat" | "knowledge" | "search" | "agent" | "strategy" | "settings";
@@ -23,6 +24,7 @@ interface SidebarProps {
   conversations: { id: string; title: string }[];
   activeConversation: string | null;
   onSelectConversation: (id: string) => void;
+  onDeleteConversation: (id: string) => void;
   isOpen: boolean;
   onToggle: () => void;
 }
@@ -43,6 +45,7 @@ export function Sidebar({
   conversations,
   activeConversation,
   onSelectConversation,
+  onDeleteConversation,
   isOpen,
   onToggle,
 }: SidebarProps) {
@@ -117,18 +120,30 @@ export function Sidebar({
             </p>
             <div className="space-y-0.5">
               {conversations.map((conv) => (
-                <button
+                <div
                   key={conv.id}
-                  onClick={() => { onSelectConversation(conv.id); onToggle(); }}
                   className={cn(
-                    "w-full truncate rounded-lg px-3 py-1.5 text-left text-xs transition-colors duration-150 cursor-pointer",
+                    "group flex items-center rounded-lg px-3 py-1.5 transition-colors duration-150",
                     activeConversation === conv.id
                       ? "bg-surface text-foreground"
                       : "text-muted hover:bg-surface/50"
                   )}
                 >
-                  {conv.title}
-                </button>
+                  <button
+                    onClick={() => { onSelectConversation(conv.id); onToggle(); }}
+                    className="flex-1 truncate text-left text-xs cursor-pointer"
+                  >
+                    {conv.title}
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onDeleteConversation(conv.id); }}
+                    className="rounded p-0.5 text-muted/20 opacity-0 group-hover:opacity-100
+                               hover:text-error hover:bg-error/10 transition-all duration-150 cursor-pointer shrink-0"
+                    title="删除对话"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
               ))}
             </div>
           </div>

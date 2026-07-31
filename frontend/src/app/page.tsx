@@ -49,6 +49,11 @@ export default function Home() {
     setActiveTab("chat");
   }, []);
 
+  const handleDeleteConversation = useCallback((id: string) => {
+    setConversations((prev) => prev.filter((c) => c.id !== id));
+    if (activeConversation === id) setActiveConversation(null);
+  }, [activeConversation]);
+
   if (showOnboarding) {
     return <OnboardingWizard onComplete={handleOnboardingComplete} />;
   }
@@ -79,6 +84,7 @@ export default function Home() {
         conversations={conversations}
         activeConversation={activeConversation}
         onSelectConversation={handleSelectConversation}
+        onDeleteConversation={handleDeleteConversation}
         isOpen={sidebarOpen}
         onToggle={() => setSidebarOpen((o) => !o)}
       />
