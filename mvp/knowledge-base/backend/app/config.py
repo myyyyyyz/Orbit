@@ -87,8 +87,8 @@ class StorageStrategy:
     # Collection 名称
     collection: str = "documents"
 
-    # 持久化目录
-    persist_dir: str = os.path.join(os.path.dirname(__file__), "..", "chroma_data")
+    # 持久化目录 → 统一输出到 Orbit/data/chroma_db
+    persist_dir: str = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "data", "chroma_db")
 
 
 class RetrievalStrategy:
@@ -154,7 +154,7 @@ class Settings:
     rag: RAGStrategy = RAGStrategy()
 
     # Upload
-    UPLOAD_DIR: str = os.path.join(os.path.dirname(__file__), "..", "uploads")
+    UPLOAD_DIR: str = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "data", "uploads")
     MAX_FILE_SIZE: int = 20 * 1024 * 1024  # 20 MB
 
     # 数据库 URL 抽象（默认 SQLite，生产可切 PostgreSQL）

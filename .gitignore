@@ -25,6 +25,9 @@ chroma/
 # Uploads
 uploads/
 
+# Runtime data (db, uploads, logs, memory)
+data/
+
 # Environment
 .env
 .env.local

@@ -488,8 +488,8 @@ def api_logos_summarize(body: dict = Body(...)):
     else:
         summary = f"### 对话总结（无 LLM，原始记录）\n\n{conversation[:500]}"
 
-    # 写入 your-memory/YYYY-MM-DD.md
-    memory_dir = pathlib.Path(settings.UPLOAD_DIR).parent / "your-memory"
+    # 写入 Orbit/data/memory/YYYY-MM-DD.md
+    memory_dir = pathlib.Path(settings.UPLOAD_DIR).parent / "memory"
     memory_dir.mkdir(parents=True, exist_ok=True)
 
     today = datetime.now().strftime("%Y-%m-%d")
