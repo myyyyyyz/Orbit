@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { system } from "@/lib/api";
 import {
   Settings, Cpu, Database, CheckCircle2, XCircle, Loader2,
-  Plus, ChevronDown, ChevronUp,
+  Plus, ChevronDown, ChevronUp, Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -65,7 +65,17 @@ export function SettingsPanel() {
   }, []);
 
   const toggle = (i: number) => {
-    setExpandedIndex((prev) => (prev === i ? null : i));
+    setExpandedIndex((prev) => {
+      if (prev === i) {
+        // collapsing - auto-remove if empty name
+        if (!models[i].name.trim()) {
+          removeModel(i);
+          return null;
+        }
+        return null;
+      }
+      return i;
+    });
   };
 
   const updateModel = (i: number, patch: Partial<ModelConfig>) => {
@@ -204,9 +214,19 @@ export function SettingsPanel() {
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex items-center gap-1.5 shrink-0">
                       {m.apiKey && (
                         <span className="hidden sm:inline text-[10px] text-muted/50">API Key 已配置</span>
+                      )}
+                      {models.length > 1 && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); removeModel(i); }}
+                          className="rounded-md p-1 text-muted/30 hover:text-error hover:bg-error/10
+                                     transition-all duration-150 cursor-pointer"
+                          title="删除模型"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
                       )}
                       {isExpanded
                         ? <ChevronUp className="h-4 w-4 text-muted/40" />
@@ -250,8 +270,8 @@ export function SettingsPanel() {
                         />
                       </div>
 
-                      {/* Enable + Delete */}
-                      <div className="flex items-center justify-between">
+                      {/* Enable toggle */}
+                      <div className="flex items-center">
                         <label className="flex items-center gap-2 cursor-pointer">
                           <button
                             role="switch"
@@ -271,15 +291,6 @@ export function SettingsPanel() {
                           </button>
                           <span className="text-xs text-muted">启用此模型</span>
                         </label>
-
-                        {models.length > 1 && (
-                          <button
-                            onClick={() => removeModel(i)}
-                            className="text-xs text-muted/40 hover:text-error transition-colors duration-150 cursor-pointer"
-                          >
-                            删除
-                          </button>
-                        )}
                       </div>
                     </div>
                   )}
