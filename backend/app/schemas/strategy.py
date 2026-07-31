@@ -29,9 +29,18 @@ class StrategyPatch(BaseModel):
     retrieval: Optional[RetrievalPatch] = None
 
 
+# Patch 字段名 → settings 属性名映射（命名不一致的字段）
+_FIELD_ALIASES = {
+    "chunk_size": "size",          # ChunkStrategy.size
+    "chunk_overlap": "overlap",    # ChunkStrategy.overlap
+    "embedding_model": "model",    # EmbedStrategy.model
+    "search_mode": "method",       # RetrievalStrategy.method
+}
+
+
 def _apply_section(target: object, patch: Optional[BaseModel]) -> None:
     """Apply non-None fields from a Pydantic patch to a target object via setattr."""
     if patch is None:
         return
     for field_name, value in patch.model_dump(exclude_none=True).items():
-        setattr(target, field_name, value)
+        setattr(target, _FIELD_ALIASES.get(field_name, field_name), value)
