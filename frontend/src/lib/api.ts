@@ -1,8 +1,20 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
 
-function getToken(): string | null {
+function getStored(key: string): string | null {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem("orbit_token");
+  return localStorage.getItem(key);
+}
+
+function getToken(): string | null {
+  return getStored("orbit_token");
+}
+
+function getApiKey(): string | null {
+  return getStored("orbit_llm_key");
+}
+
+function getModel(): string | null {
+  return getStored("orbit_llm_model");
 }
 
 async function request<T>(
@@ -10,12 +22,20 @@ async function request<T>(
   options: RequestInit = {}
 ): Promise<T> {
   const token = getToken();
+  const apiKey = getApiKey();
+  const model = getModel();
   const headers: Record<string, string> = {
     ...(options.headers as Record<string, string>),
   };
 
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
+  }
+  if (apiKey) {
+    headers["X-API-Key"] = apiKey;
+  }
+  if (model) {
+    headers["X-LLM-Model"] = model;
   }
 
   // Don't set Content-Type for FormData (browser sets it with boundary)

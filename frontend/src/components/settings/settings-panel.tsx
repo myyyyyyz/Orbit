@@ -1,15 +1,30 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { system } from "@/lib/api";
-import { Settings, Cpu, Database, Zap, CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { Settings, Cpu, Database, Zap, CheckCircle2, XCircle, Loader2, Save } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+function getSavedApiKey(): string {
+  if (typeof window === "undefined") return "";
+  // Prefer saved key, fallback to env default (for dev convenience)
+  return localStorage.getItem("orbit_llm_key")
+    || process.env.NEXT_PUBLIC_LLM_API_KEY
+    || "";
+}
+
+function getSavedModel(): string {
+  if (typeof window === "undefined") return "gpt-4o-mini";
+  return localStorage.getItem("orbit_llm_model") || "gpt-4o-mini";
+}
 
 export function SettingsPanel() {
   const [health, setHealth] = useState<Record<string, string> | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
-  const [model, setModel] = useState("gpt-4o-mini");
-  const [apiKey, setApiKey] = useState("");
+  const [model, setModel] = useState(getSavedModel);
+  const [apiKey, setApiKey] = useState(getSavedApiKey);
+  const [keySaved, setKeySaved] = useState(false);
+  const [keyMasked, setKeyMasked] = useState(true);
 
   const checkHealth = async () => {
     setHealthLoading(true);
@@ -26,6 +41,15 @@ export function SettingsPanel() {
   useEffect(() => {
     checkHealth();
   }, []);
+
+  const saveApiKey = useCallback(() => {
+    localStorage.setItem("orbit_llm_key", apiKey);
+    localStorage.setItem("orbit_llm_model", model);
+    setKeySaved(true);
+    setTimeout(() => setKeySaved(false), 2000);
+  }, [apiKey, model]);
+
+  const hasKey = apiKey.length > 0;
 
   const StatusIcon = ({ ok }: { ok: boolean }) =>
     ok ? (
@@ -102,21 +126,39 @@ export function SettingsPanel() {
           <div className="space-y-3">
             <div>
               <label htmlFor="apikey" className="block text-xs font-medium text-muted mb-1">
-                API Key
+                API Key {hasKey && <span className="text-success">(已配置)</span>}
               </label>
-              <input
-                id="apikey"
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="sk-..."
-                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm
-                           placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-primary/30
-                           transition-[border-color,box-shadow] duration-200"
-              />
-              <p className="mt-1 text-[11px] text-muted/60">
-                注意：生产环境中 API Key 通过环境变量配置
-              </p>
+              <div className="flex gap-2">
+                <input
+                  id="apikey"
+                  type={keyMasked ? "password" : "text"}
+                  value={apiKey}
+                  onChange={(e) => { setApiKey(e.target.value); setKeySaved(false); }}
+                  placeholder="sk-..."
+                  className="flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm
+                             placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-primary/30
+                             transition-[border-color,box-shadow] duration-200"
+                />
+                <button
+                  onClick={saveApiKey}
+                  className="flex items-center gap-1 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-white
+                             hover:bg-primary-hover active:scale-[0.98] transition-all duration-150 cursor-pointer shrink-0"
+                >
+                  {keySaved ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Save className="h-3.5 w-3.5" />}
+                  {keySaved ? "已保存" : "保存"}
+                </button>
+              </div>
+              <div className="flex items-center justify-between mt-1">
+                <p className="text-[11px] text-muted/60">
+                  密钥仅保存在浏览器本地，不会上传到服务器
+                </p>
+                <button
+                  onClick={() => setKeyMasked(!keyMasked)}
+                  className="text-[11px] text-primary hover:underline cursor-pointer"
+                >
+                  {keyMasked ? "显示" : "隐藏"}
+                </button>
+              </div>
             </div>
             <div>
               <label htmlFor="model" className="block text-xs font-medium text-muted mb-1">
@@ -125,14 +167,15 @@ export function SettingsPanel() {
               <select
                 id="model"
                 value={model}
-                onChange={(e) => setModel(e.target.value)}
+                onChange={(e) => { setModel(e.target.value); setKeySaved(false); }}
                 className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm
                            focus:outline-none focus:ring-2 focus:ring-primary/30
                            transition-[border-color,box-shadow] duration-200 cursor-pointer"
               >
+                <option value="deepseek-chat">DeepSeek V3</option>
+                <option value="deepseek-reasoner">DeepSeek R1</option>
                 <option value="gpt-4o">GPT-4o</option>
                 <option value="gpt-4o-mini">GPT-4o-mini</option>
-                <option value="gpt-4-turbo">GPT-4 Turbo</option>
                 <option value="claude-3-5-sonnet">Claude 3.5 Sonnet</option>
                 <option value="ollama">Ollama (本地)</option>
               </select>
