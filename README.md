@@ -37,58 +37,52 @@
 
 ```
 Orbit/
-├── frontend/                    # Web UI (Next.js 16 + Tailwind v4)
-│   ├── src/app/                 # 路由 + 全局样式
-│   ├── src/lib/                 # API 封装 + 工具函数
-│   └── src/components/          # UI 组件
-│       ├── chat/                # 流式对话、Markdown 渲染、引用悬浮
-│       ├── sidebar/             # 响应式侧边栏
-│       ├── knowledge-base/      # 文档上传、列表管理
-│       ├── search/              # 语义搜索面板
-│       ├── agent/               # Agent Loop 状态观察台
-│       ├── strategy/            # RAG 策略可视化配置
-│       ├── settings/            # API Key + 多模型管理
-│       ├── onboarding/          # 新手引导向导
-│       └── auth/                # 登录/注册
+├── frontend/                  # Web UI (Next.js 16 + Tailwind v4)
+│   ├── src/app/               # 路由 + 全局样式
+│   ├── src/lib/               # API 封装 + 工具函数
+│   └── src/components/        # UI 组件
+│       ├── chat/              # 流式对话、Markdown、引用悬浮
+│       ├── sidebar/           # 响应式侧边栏
+│       ├── knowledge-base/    # 文档上传、列表管理
+│       ├── search/            # 语义搜索面板
+│       ├── agent/             # Agent 观察台
+│       ├── strategy/          # RAG 策略配置
+│       ├── settings/          # API Key + 多模型管理
+│       ├── onboarding/        # 新手引导
+│       └── auth/              # 登录/注册
 │
-├── mvp/knowledge-base/backend/  # 知识库后端 (FastAPI)
+├── backend/                   # 知识库后端 (FastAPI)
 │   └── app/
-│       ├── main.py              # 30+ API 端点
-│       ├── generate/            # LLM 生成 (自动匹配模型 API 地址)
-│       ├── stream/              # SSE 流式输出 (7 阶段事件)
-│       ├── search/              # 语义检索 (向量 + BM25 + 混合)
-│       ├── embed/               # 双后端 Embedding
-│       ├── chunk/               # 语义切割 (中文适配)
-│       ├── ingest/              # 文件解析 (PDF/MD/TXT)
-│       ├── store/               # ChromaDB 存储
-│       ├── router/              # 模型路由 (fast/balanced/strong)
-│       ├── cache/               # 语义缓存 (736x 加速)
-│       ├── multitenant/         # 多租户隔离
-│       ├── middleware/          # JWT 鉴权 + X-Request-ID
-│       └── schemas/             # Pydantic 模型
+│       ├── main.py            # 30+ API 端点
+│       ├── generate/          # LLM 生成 (自动匹配模型 API 地址)
+│       ├── stream/            # SSE 流式输出 (7 阶段事件)
+│       ├── search/            # 语义检索 (向量 + BM25 + 混合)
+│       ├── embed/             # 双后端 Embedding
+│       ├── chunk/             # 语义切割 (中文适配)
+│       ├── ingest/            # 文件解析 (PDF/MD/TXT)
+│       ├── store/             # ChromaDB 存储
+│       ├── router/            # 模型路由 (fast/balanced/strong)
+│       ├── cache/             # 语义缓存 (736x 加速)
+│       ├── multitenant/       # 多租户隔离
+│       ├── middleware/        # JWT 鉴权 + X-Request-ID
+│       └── schemas/           # Pydantic 模型
 │
-├── agent loop/                  # Agent 编排框架
-│   ├── agents/                  # 6 个 Agent 角色定义
-│   │   ├── master.md            # 需求对齐
-│   │   ├── planner.md           # 只读分析 + 出计划
-│   │   ├── builder.md           # 执行代码修改
-│   │   ├── reviewer.md          # 两阶段审查
-│   │   ├── user.md              # UX 审查
-│   │   └── knowledge.md         # 知识库管理
-│   ├── memory/                  # Agent 运行时状态
-│   ├── scenes/                  # 场景定义
-│   ├── skills/                  # 12 个集成 Skill
-│   └── run-loop.sh              # CLI Runner
+├── agent-loop/                # Agent 编排框架
+│   ├── agents/                # 6 个 Agent 角色定义
+│   ├── memory/                # Agent 运行时状态
+│   ├── scenes/                # 场景定义
+│   ├── skills/                # 12 个集成 Skill
+│   └── run-loop.sh            # CLI Runner
 │
-├── data/                        # 运行时数据 (gitignore)
-│   ├── chroma_db/               # ChromaDB 向量存储
-│   ├── uploads/                 # 上传文档
-│   ├── logs/                    # 后端日志
-│   ├── memory/                  # Logos 对话总结
-│   └── screenshots/             # 浏览器截图
+├── data/                      # 运行时数据 (gitignore)
+│   ├── chroma_db/             # ChromaDB 向量存储
+│   ├── uploads/               # 上传文档
+│   ├── logs/                  # 后端日志
+│   ├── memory/                # Logos 对话总结
+│   └── screenshots/           # 浏览器截图
 │
-└── docs/                        # 项目文档
-    └── FRONTEND-PRD.md          # 前端需求规格
+└── docs/                      # 项目文档
+    └── FRONTEND-PRD.md        # 前端需求规格
 ```
 
 ---
@@ -98,7 +92,7 @@ Orbit/
 ### 1. 启动后端
 
 ```bash
-cd mvp/knowledge-base/backend
+cd backend
 pip install -r requirements.txt
 python3 -m uvicorn app.main:app --port 8001 --host 0.0.0.0
 ```
@@ -113,7 +107,7 @@ npm run dev -- -p 3000
 
 ### 3. 配置 API Key
 
-打开 `http://localhost:3000` → 完成新手引导 → 点击左侧 **设置** → 在模型管理卡片中展开 deepseek-chat → 填入 API Key 和模型名。
+打开 `http://localhost:3000` → 完成新手引导 → 左侧 **设置** → 展开模型卡片 → 填入 API Key 和模型名。
 
 > API Key 仅保存在浏览器本地，前端通过 `X-API-Key` 请求头传递给后端，后端据此调用 LLM。
 
@@ -168,14 +162,14 @@ LLM 生成 → SSE 流式返回 → 前端渲染
 
 | 模块 | 功能 |
 |------|------|
-| **对话** | SSE 流式、Markdown 渲染、建议问题快捷入口、复制/反馈 |
+| **对话** | SSE 流式、Markdown、建议问题、复制/反馈 |
 | **知识库** | 拖拽上传、文档列表、本地搜索 |
-| **搜索** | 后端语义搜索、结果排序 + 相似度百分比 |
-| **Agent 观察台** | 状态摘要 + 可展开时间线 + 计划/代码/审查预览 |
-| **策略配置** | Chunk/Overlap/Top-K 滑块 + Embedding 模型 + 检索模式 + Rerank |
-| **设置** | API Key 输入/保存/显示隐藏 + 多模型管理 (点击展开) + 系统健康状态 |
-| **新手引导** | 首次访问自动弹出 → 角色选择 → 推荐 Skill 组合 |
-| **侧边栏** | 响应式 (移动端汉堡菜单) + 历史对话删除 |
+| **搜索** | 后端语义搜索、相似度百分比 |
+| **Agent 观察台** | 状态摘要 + 可展开时间线 + 预览 |
+| **策略配置** | Chunk/Overlap/Top-K 滑块 + 模型 + 检索模式 + Rerank |
+| **设置** | API Key 保存/显示 + 多模型管理 (点击展开) + 健康状态 |
+| **新手引导** | 首次弹出 → 角色选择 → 推荐 Skill |
+| **侧边栏** | 响应式 + 历史对话删除 |
 
 ---
 
@@ -199,7 +193,7 @@ LLM 生成 → SSE 流式返回 → 前端渲染
 |---|------|
 | 前端框架 | Next.js 16 + TypeScript |
 | 样式 | Tailwind v4 + CSS 变量 |
-| 动画 | Motion (Framer Motion) |
+| 动画 | Motion |
 | 图标 | Lucide React |
 | Markdown | react-markdown + rehype-sanitize |
 | 后端框架 | FastAPI + Python 3.9+ |
@@ -207,22 +201,22 @@ LLM 生成 → SSE 流式返回 → 前端渲染
 | 关系数据库 | SQLite |
 | Embedding | sentence-transformers (MiniLM) |
 | 文件解析 | PyPDF2 |
-| 流式输出 | SSE (Server-Sent Events) |
+| 流式输出 | SSE |
 | Agent 框架 | 自研五 Agent + 文件通信协议 |
 
 ---
 
-## 开发
+## 开发调试
 
 ```bash
-# 调试后端
+# 测试后端问答
 curl -X POST http://localhost:8001/api/knowledge/ask \
   -H "Content-Type: application/json" \
   -H "X-API-Key: sk-xxx" \
   -H "X-LLM-Model: deepseek-chat" \
   -d '{"question": "hello"}'
 
-# 调试流式
+# 测试流式 SSE
 curl -N "http://localhost:8001/api/knowledge/ask/stream?q=hello" \
   -H "X-API-Key: sk-xxx"
 ```
