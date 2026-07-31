@@ -73,7 +73,15 @@ def stream_ask(question: str, top_k: int = None, user_id: int = None, api_key: s
     # ── Event 5: 生成（流式）──
     if api_key is None:
         api_key = os.getenv("LLM_API_KEY", "")
-    base_url = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1/chat/completions")
+    # 根据模型名自动匹配 API 地址
+    model_name = route.model or os.getenv("LLM_MODEL", "gpt-4o-mini")
+    if "deepseek" in model_name.lower():
+        default_url = "https://api.deepseek.com/v1/chat/completions"
+    elif "claude" in model_name.lower():
+        default_url = "https://api.anthropic.com/v1/messages"
+    else:
+        default_url = "https://api.openai.com/v1/chat/completions"
+    base_url = os.getenv("LLM_BASE_URL", default_url)
 
     sources = [{"source": c["metadata"].get("source", "?"), "score": c["score"], "preview": c["text"][:80]} for c in chunks]
 

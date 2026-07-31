@@ -6,11 +6,20 @@ import urllib.request
 from ..config import settings
 
 
-def _get_llm_config():
-    """从环境变量读取 LLM 配置"""
+def _get_llm_config(model: str = None):
+    """从环境变量读取 LLM 配置，根据模型名自动选择 API 地址"""
     api_key = os.getenv("LLM_API_KEY", "")
-    base_url = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1/chat/completions")
-    model = os.getenv("LLM_MODEL", "gpt-4o-mini")
+    model = model or os.getenv("LLM_MODEL", "gpt-4o-mini")
+
+    # 根据模型名自动匹配 API 地址
+    if "deepseek" in model.lower():
+        default_url = "https://api.deepseek.com/v1/chat/completions"
+    elif "claude" in model.lower():
+        default_url = "https://api.anthropic.com/v1/messages"
+    else:
+        default_url = "https://api.openai.com/v1/chat/completions"
+
+    base_url = os.getenv("LLM_BASE_URL", default_url)
     return api_key, base_url, model
 
 
@@ -24,11 +33,11 @@ def generate_answer(question: str, context_chunks: list[dict], history: list[dic
 
     返回: { ... }
     """
-    env_key, base_url, default_model = _get_llm_config()
+    if model is None:
+        model = os.getenv("LLM_MODEL", "gpt-4o-mini")
+    env_key, base_url, _ = _get_llm_config(model=model)
     if api_key is None:
         api_key = env_key
-    if model is None:
-        model = default_model
 
     # 构建系统提示
     system_prompt = """你是一个知识库问答助手。根据下面提供的知识库检索结果回答用户问题。
