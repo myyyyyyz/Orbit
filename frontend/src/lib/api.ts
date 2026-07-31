@@ -10,12 +10,23 @@ function getToken(): string | null {
 }
 
 function getApiKey(): string | null {
+  // v2: read from enabled model
+  try {
+    const models = JSON.parse(getStored("orbit_llm_models_v2") || "[]") as { name: string; enabled: boolean; apiKey: string }[];
+    const active = models.find((m) => m.enabled);
+    if (active?.apiKey) return active.apiKey;
+  } catch { /* fall through */ }
   return getStored("orbit_llm_key");
 }
 
 function getModel(): string | null {
-  return getStored("orbit_llm_active_model")
-    || getStored("orbit_llm_model"); // legacy fallback
+  // v2 format: read enabled model from orbit_llm_models_v2
+  try {
+    const models = JSON.parse(getStored("orbit_llm_models_v2") || "[]") as { name: string; enabled: boolean }[];
+    const active = models.find((m) => m.enabled);
+    if (active) return active.name;
+  } catch { /* fall through */ }
+  return getStored("orbit_llm_active_model") || getStored("orbit_llm_model");
 }
 
 async function request<T>(
