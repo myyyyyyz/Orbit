@@ -1,0 +1,28 @@
+- generic [ref=e2]:
+  - complementary [ref=e3]:
+    - generic [ref=e4]: Orbit
+    - navigation [ref=e9]:
+      - button "新对话" [ref=e10] [cursor=pointer]
+      - button "对话" [ref=e12] [cursor=pointer]
+      - button "知识库" [ref=e15] [cursor=pointer]
+      - button "搜索" [ref=e18] [cursor=pointer]
+      - button "Agent 观察" [ref=e22] [cursor=pointer]
+      - button "策略配置" [ref=e26] [cursor=pointer]
+      - button "设置" [ref=e28] [cursor=pointer]
+    - generic [ref=e32]: Orbit v1.0
+  - main [ref=e33]:
+    - generic [ref=e35]:
+      - generic [ref=e38]:
+        - heading "有什么我可以帮助你的？" [level=1] [ref=e39]
+        - paragraph [ref=e40]: 我可以帮你查询知识库、分析文档、委派 Agent 执行任务。
+        - generic [ref=e41]:
+          - button "总结我上传的文档" [ref=e42] [cursor=pointer]
+          - button "这个项目有哪些模块" [ref=e43] [cursor=pointer]
+          - button "帮我规划一个新功能" [ref=e44] [cursor=pointer]
+      - generic [ref=e46]:
+        - generic [ref=e47]:
+          - textbox "输入消息... (Enter 发送, Shift+Enter 换行)" [ref=e48]
+          - generic [ref=e49]:
+            - button "上传文件" [ref=e50] [cursor=pointer]
+            - button "发送" [disabled] [ref=e53] [cursor=pointer]
+        - paragraph [ref=e57]: Orbit 可能产生不准确信息，请核实重要内容

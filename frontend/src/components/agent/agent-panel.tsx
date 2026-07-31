@@ -85,7 +85,7 @@ export function AgentPanel() {
 
       <div className="flex-1 overflow-y-auto px-6 py-4">
         {/* Status Summary */}
-        <div className="mb-5 grid grid-cols-4 gap-2">
+        <div className="mb-5 grid grid-cols-3 md:grid-cols-5 gap-2">
           {(Object.keys(statusConfig) as AgentStatus[]).map((s) => {
             const count = mockSteps.filter((step) => step.status === s).length;
             const cfg = statusConfig[s];

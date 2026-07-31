@@ -19,6 +19,7 @@ export function KnowledgeBasePanel() {
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<"idle" | "success" | "error">("idle");
   const [searchQuery, setSearchQuery] = useState("");
+  const [backendError, setBackendError] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Fetch existing documents on mount
@@ -39,7 +40,7 @@ export function KnowledgeBasePanel() {
           setDocuments(docs);
         }
       })
-      .catch(() => {/* backend may not support list */});
+      .catch(() => setBackendError(true));
   }, []);
 
   const handleUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -77,6 +78,9 @@ export function KnowledgeBasePanel() {
       <div className="border-b border-border/50 px-6 py-4">
         <h2 className="text-base font-semibold tracking-tight">知识库管理</h2>
         <p className="mt-1 text-xs text-muted">上传文档，让 AI 检索你的专属知识</p>
+        {backendError && (
+          <p className="mt-2 text-xs text-warning">后端服务未运行，部分功能不可用</p>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">

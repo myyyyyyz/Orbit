@@ -86,10 +86,18 @@ export function MessageItem({ message }: MessageItemProps) {
             >
               <Copy className="h-3 w-3" />
             </button>
-            <button className="rounded p-1 text-muted hover:text-success transition-colors cursor-pointer" title="有用">
+            <button
+              className="rounded p-1 text-muted hover:text-success transition-colors cursor-pointer"
+              title="有用"
+              onClick={() => console.log("[Feedback] positive:", message.id)}
+            >
               <ThumbsUp className="h-3 w-3" />
             </button>
-            <button className="rounded p-1 text-muted hover:text-error transition-colors cursor-pointer" title="无用">
+            <button
+              className="rounded p-1 text-muted hover:text-error transition-colors cursor-pointer"
+              title="无用"
+              onClick={() => console.log("[Feedback] negative:", message.id)}
+            >
               <ThumbsDown className="h-3 w-3" />
             </button>
           </div>
