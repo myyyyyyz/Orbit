@@ -14,7 +14,8 @@ function getApiKey(): string | null {
 }
 
 function getModel(): string | null {
-  return getStored("orbit_llm_model");
+  return getStored("orbit_llm_active_model")
+    || getStored("orbit_llm_model"); // legacy fallback
 }
 
 async function request<T>(
