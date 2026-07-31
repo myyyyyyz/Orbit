@@ -14,22 +14,19 @@ def _get_llm_config():
     return api_key, base_url, model
 
 
-def generate_answer(question: str, context_chunks: list[dict], history: list[dict] = None, model: str = None) -> dict:
+def generate_answer(question: str, context_chunks: list[dict], history: list[dict] = None, model: str = None, api_key: str = None) -> dict:
     """
     RAG 生成：检索结果 + 用户问题 → LLM → 带引用的答案
 
     参数:
         model: 指定 LLM 模型名。不传时使用 LLM_MODEL 环境变量默认值。
-               调用方应通过此参数显式传入模型，避免并发竞态条件。
+        api_key: API Key。优先使用此参数，不传时回退到环境变量 LLM_API_KEY。
 
-    返回: {
-        "answer": str,           # LLM 生成的答案
-        "sources": list[dict],   # 引用的来源
-        "model": str,            # 使用的模型
-        "context_count": int,    # 注入的上下文数
-    }
+    返回: { ... }
     """
-    api_key, base_url, default_model = _get_llm_config()
+    env_key, base_url, default_model = _get_llm_config()
+    if api_key is None:
+        api_key = env_key
     if model is None:
         model = default_model
 

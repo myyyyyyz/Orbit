@@ -260,7 +260,7 @@ def api_context(
 # ================================================================
 
 @app.post("/api/knowledge/ask")
-def api_ask(body: dict = Body(...), current_user: Optional[dict] = Depends(get_optional_user)):
+def api_ask(request: Request, body: dict = Body(...), current_user: Optional[dict] = Depends(get_optional_user)):
     """
     RAG 完整闭环：用户问题 → 缓存检查 → 检索 → 模型路由 → LLM 生成 → 带引用返回
 
@@ -321,8 +321,10 @@ def api_ask(body: dict = Body(...), current_user: Optional[dict] = Depends(get_o
         }
 
     # ── 生成（使用路由选择的模型）──
-    # 直接传 model 参数，避免 os.environ 并发竞态条件
-    result = generate_answer(question, chunks, body.get("history", []), model=route.model)
+    # 优先使用前端传的 API Key 和模型，否则回退到路由/环境变量
+    user_api_key = request.headers.get("X-API-Key") or None
+    user_model = request.headers.get("X-LLM-Model") or route.model
+    result = generate_answer(question, chunks, body.get("history", []), model=user_model, api_key=user_api_key)
 
     # ── P3: 存入缓存 ──
     cache_put(question, result["answer"], result["sources"], result["model"])
@@ -345,6 +347,7 @@ def api_ask(body: dict = Body(...), current_user: Optional[dict] = Depends(get_o
 
 @app.get("/api/knowledge/ask/stream")
 def api_ask_stream(
+    request: Request,
     q: str = Query(..., description="用户问题"),
     top_k: int = Query(None, description="检索结果数"),
     current_user: Optional[dict] = Depends(get_optional_user),
@@ -361,8 +364,9 @@ def api_ask_stream(
     - error: 错误
     """
     user_id = current_user["user_id"] if current_user else None
+    user_api_key = request.headers.get("X-API-Key") or None
     return StreamingResponse(
-        stream_ask(q, top_k, user_id=user_id),
+        stream_ask(q, top_k, user_id=user_id, api_key=user_api_key),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

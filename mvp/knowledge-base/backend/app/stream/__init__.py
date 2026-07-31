@@ -16,7 +16,7 @@ from ..cache import get as cache_get, put as cache_put
 from ..embed import encode
 
 
-def stream_ask(question: str, top_k: int = None, user_id: int = None):
+def stream_ask(question: str, top_k: int = None, user_id: int = None, api_key: str = None):
     """
     流式 RAG 问答生成器。
     yield SSE 格式的数据。
@@ -71,7 +71,8 @@ def stream_ask(question: str, top_k: int = None, user_id: int = None):
     })
 
     # ── Event 5: 生成（流式）──
-    api_key = os.getenv("LLM_API_KEY", "")
+    if api_key is None:
+        api_key = os.getenv("LLM_API_KEY", "")
     base_url = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1/chat/completions")
 
     sources = [{"source": c["metadata"].get("source", "?"), "score": c["score"], "preview": c["text"][:80]} for c in chunks]
