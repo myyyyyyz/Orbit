@@ -184,8 +184,9 @@ def api_ask_stream(
     """流式 RAG 问答（SSE）"""
     user_id = current_user["user_id"] if current_user else None
     user_api_key = request.headers.get("X-API-Key") or None
+    user_model = request.headers.get("X-LLM-Model") or None
     return StreamingResponse(
-        stream_ask(q, top_k, user_id=user_id, api_key=user_api_key),
+        stream_ask(q, top_k, user_id=user_id, api_key=user_api_key, model=user_model),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )

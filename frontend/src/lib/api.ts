@@ -113,13 +113,20 @@ export const knowledge = {
     abortSignal?: AbortSignal
   ): Promise<void> => {
     const token = getToken();
+    const apiKey = getApiKey();
+    const model = getModel();
     const params = new URLSearchParams({
       q: question,
       top_k: String(topK),
     });
 
+    const headers: Record<string, string> = {};
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    if (apiKey) headers["X-API-Key"] = apiKey;
+    if (model) headers["X-LLM-Model"] = model;
+
     return fetch(`${API_BASE}/api/knowledge/ask/stream?${params}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      headers,
       signal: abortSignal,
     }).then(async (response) => {
       if (!response.ok) {
