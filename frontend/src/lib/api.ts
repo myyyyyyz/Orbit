@@ -152,6 +152,11 @@ export const knowledge = {
             try {
               const data = JSON.parse(line.slice(6));
               if (data.stage) continue;
+              // error 事件：{"message": "..."} — 必须处理，否则失败时消息空白
+              if (data.message) {
+                onError?.(data.message);
+                continue;
+              }
               if (data.text) onToken?.(data.text);
               if (data.model) onDone?.(data.model);
             } catch {
