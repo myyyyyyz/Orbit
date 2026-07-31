@@ -1,0 +1,31 @@
+- generic [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e63] [cursor=pointer]
+  - alert [ref=e67]
+  - generic [ref=e98]:
+    - generic [ref=e99]:
+      - heading "选择你的角色" [level=2] [ref=e100]
+      - paragraph [ref=e101]: Orbit 会为你推荐合适的 Skill 组合
+    - generic [ref=e102]:
+      - button [active] [ref=e103] [cursor=pointer]:
+        - generic [ref=e109]:
+          - paragraph [ref=e110]: 开发者
+          - paragraph [ref=e111]: 写代码、调试、架构设计
+      - button [ref=e112] [cursor=pointer]:
+        - generic [ref=e117]:
+          - paragraph [ref=e118]: 产品经理
+          - paragraph [ref=e119]: 需求分析、产品规划
+      - button [ref=e120] [cursor=pointer]:
+        - generic [ref=e126]:
+          - paragraph [ref=e127]: 管理者
+          - paragraph [ref=e128]: 团队管理、项目协调
+      - button [ref=e129] [cursor=pointer]:
+        - generic [ref=e134]:
+          - paragraph [ref=e135]: 学生
+          - paragraph [ref=e136]: 学习、研究、论文
+      - button [ref=e137] [cursor=pointer]:
+        - generic [ref=e142]:
+          - paragraph [ref=e143]: 其他
+          - paragraph [ref=e144]: 通用场景
+    - generic [ref=e145]:
+      - button "上一步" [ref=e146] [cursor=pointer]
+      - button "开始使用" [ref=e149] [cursor=pointer]

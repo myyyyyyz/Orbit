@@ -66,7 +66,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in _CORS_ORIGINS.split(",") if o.strip()],
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
-    allow_headers=["Content-Type", "Authorization"],
+    allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-LLM-Model"],
 )
 
 
