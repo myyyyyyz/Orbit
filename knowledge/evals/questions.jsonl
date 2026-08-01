@@ -1,0 +1,5 @@
+{"question": "What is the P1 first response target?", "expected": "four hours", "source": "clean-policy.md", "locator": "Support levels"}
+{"question": "How long is the Q3 deletion recovery period?", "expected": "30 days", "source": "clean-policy.md", "locator": "Deletion policy"}
+{"question": "What blocks ORB-2407?", "expected": "SSO metadata", "source": "text-report.pdf", "locator": "page 1"}
+{"question": "Which project has high risk?", "expected": "ORB-2407", "source": "clean-projects.xlsx", "locator": "Projects row 2"}
+{"question": "Can the scanned notice be indexed automatically?", "expected": "requires review", "source": "scanned-notice.pdf", "locator": "page 1"}
