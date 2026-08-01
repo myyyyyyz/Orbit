@@ -2,7 +2,7 @@
 
 **状态：** 已确认（方案 B）
 **分支：** `dev/knowledge`
-**范围：** 文档化设计与单份 Markdown 测试知识库；不修改应用代码。
+**范围：** 多格式测试语料、策略规划、规则兜底与第一阶段实现；不在本阶段改造线上问答生成。
 
 ---
 
@@ -10,9 +10,9 @@
 
 本设计为 Orbit 的知识库增加一个 **Knowledge Agent**：它先对 `knowledge/` 文件夹中的语料生成可审计的画像，再从受控策略目录中选择解析、切块、嵌入与检索配置，最后把带版本和来源的块写入向量数据库。
 
-本次交付只提供设计和测试语料：[企业运营知识库测试集](../../../knowledge/企业运营知识库测试集.md)。后续实现应支持 PDF、DOCX、XLSX、Markdown 与 TXT；当前 `dev/optimize` 只实际支持 PDF、Markdown、TXT，因此不能把本设计中的多格式能力误认为已上线。
+测试集将从现有的 [企业运营知识库测试集](../../../knowledge/企业运营知识库测试集.md) 扩展为实际的小型 PDF、DOCX、XLSX、Markdown、TXT 与图片型样本。Knowledge Agent 应读取该文件夹并产生策略建议；其不可用、低置信度或输出不合法时，系统必须使用规则式 RAG 策略继续完成导入。当前 `dev/optimize` 只实际支持 PDF、Markdown、TXT，因此不能把本设计中的多格式能力误认为已上线。
 
-不在本范围内：自动执行重建索引、接入外部对象存储、选择或调用付费 OCR/LLM 服务、变更租户或权限模型。
+不在第一阶段范围内：自动执行昂贵 OCR、接入外部对象存储、让 LLM 直接修改全局策略配置、替换线上生成模型或变更租户与权限模型。
 
 ## 🎯 成功标准
 
@@ -20,7 +20,8 @@
 - 策略只能从受控目录中选取；任何高成本或低置信度决策都需要人工确认。
 - 每个向量块可追溯到原文件、页码或工作表、块序号、解析器和策略版本。
 - 查询可同时利用语义相似性、关键词和元数据过滤，并返回可读引用。
-- 测试语料可验证制度问答、产品参数、版本优先级、表格记录与术语检索。
+- 测试语料包含规范、混乱、带图片、可提取文本和扫描图片型的文档，且每类都有预期策略。
+- Agent 失败时，规则兜底仍可输出可执行计划；测试集可验证制度问答、产品参数、版本优先级、表格记录与术语检索。
 
 ## 🔍 现状与设计依据
 
@@ -131,14 +132,59 @@ Knowledge Agent 不直接生成任意参数，而是从以下版本化目录中�
 
 ## ✅ 验收与后续实施
 
-本次文档验收：
+## 🧪 多格式测试集与第一阶段实现
 
-- [x] 分支从 `dev/optimize` 创建为 `dev/knowledge`。
-- [x] 提供一份可导入的 Markdown 测试知识库。
-- [x] 定义了策略目录、决策记录、块元数据、索引版本和异常处理。
-- [x] 明确了当前实现与目标能力之间的边界。
+### 测试集目录
 
-后续代码实施应拆成独立计划：先补充 DOCX/XLSX 解析与导入记录，再引入策略路由和版本化块元数据，最后接入混合检索与评估集。每一阶段都应以本次测试知识库中的可验证问题作为回归样例。
+测试集位于 `knowledge/fixtures/`，采用完全虚构的企业运营语料，避免真实业务数据进入仓库。
+
+| 样本 | 文件类型 | 结构特征 | 预期处理 |
+| --- | --- | --- | --- |
+| `clean-policy.md` | Markdown | 完整标题、表格、版本规则 | 标题优先切块。 |
+| `clean-handbook.docx` | Word | 标题、段落、嵌入图片、表格 | 标题/表格边界，图片只保留可用说明。 |
+| `messy-notes.docx` | Word | 缺少标题、空行、重复内容、混合样式 | 段落切块并降低置信度。 |
+| `text-report.pdf` | PDF | 可提取文本、页码和章节 | 页码+章节分层切块。 |
+| `scanned-notice.pdf` | PDF | 页面为图片，文本提取率低 | 标记 `needs_review`，不自动 OCR。 |
+| `clean-projects.xlsx` | Excel | 稳定表头、单一记录表 | 工作表+表头+行记录。 |
+| `messy-operations.xlsx` | Excel | 合并单元格、多工作表、空行 | 低置信度，按可识别记录组或人工审核。 |
+
+每个样本在 `knowledge/evals/questions.jsonl` 中至少有一条问题、正确依据、预期定位和版本优先级断言。该评估集既用于选择策略，也用于后续 RAG 回归。
+
+### 第一阶段边界
+
+第一阶段实现“扫描、画像、策略计划、规则兜底、dry-run 报告”，而不写入正式向量库。它新增以下边界清晰的模块：
+
+| 模块 | 责任 |
+| --- | --- |
+| `backend/app/knowledge_agent/models.py` | 定义不可变的 `CorpusProfile`、`StrategyDecision`、`IngestionPlan` 和状态枚举。 |
+| `backend/app/knowledge_agent/profiler.py` | 扫描目录、计算 SHA-256、识别格式、标题/表格信号与 PDF 文本提取率。 |
+| `backend/app/knowledge_agent/catalog.py` | 保存版本化策略目录和各策略允许的参数范围。 |
+| `backend/app/knowledge_agent/selector.py` | 先规则匹配，后调用可选 Agent；验证 Agent 输出必须属于策略目录。 |
+| `backend/app/knowledge_agent/repository.py` | 在 SQLite 记录导入运行、文档画像与策略决定，便于审计和重试。 |
+| `backend/app/knowledge_agent/pipeline.py` | 编排扫描、画像、选择和报告，不修改全局 `settings.rag`。 |
+| `backend/app/api/knowledge.py` | 新增受认证保护的 dry-run 计划接口，返回报告而不写 Chroma。 |
+
+### Agent 与规则兜底
+
+Agent 只能返回策略 ID、置信度和理由，不能输出任意 Python 配置或直接操作向量库。`selector.py` 必须先校验 `strategy_id`、参数范围和源文件兼容性；失败、超时、无效 JSON 或置信度不足均进入 `fallback`。
+
+| 文件画像 | 首选策略 | 兜底策略 |
+| --- | --- | --- |
+| Markdown/TXT 且标题明显 | `markdown_structured_v1` | 标题优先，400–700 tokens。 |
+| 可提取文本 PDF | `pdf_text_hierarchical_v1` | 页码边界，300–500 token 子块与父章节。 |
+| 扫描 PDF | `pdf_ocr_review_v1` | `needs_review`，不写正式索引。 |
+| 标题清晰的 DOCX | `docx_heading_v1` | 段落/表格边界。 |
+| 表头稳定的 XLSX | `xlsx_record_v1` | 工作表+表头+行记录。 |
+| 未知或混乱结构 | `needs_review` | 不自动执行高成本策略。 |
+
+第一阶段验收条件：
+
+- `POST /api/knowledge/plan-folder` 能对 `knowledge/fixtures/` 返回每个文件的画像、策略、置信度、理由和兜底状态。
+- Agent 被禁用或故意返回无效结果时，报告仍完整，且 `decision_source` 为 `fallback`。
+- dry-run 不创建 Chroma collection、不写入向量、不改动 `settings.rag`。
+- 单元测试覆盖每种样本、无效 Agent 输出和策略兼容性校验。
+
+后续实施应拆成独立计划：第二阶段执行实际 DOCX/XLSX 解析与版本化入库，第三阶段接入混合检索与评估集。每一阶段都以 `knowledge/evals/questions.jsonl` 中的断言作为回归样例。
 
 ## 🔗 参考资料
 
