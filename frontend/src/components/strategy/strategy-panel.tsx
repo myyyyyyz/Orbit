@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Sliders, Save, RotateCcw, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { strategy } from "@/lib/api";
 
 interface StrategyState {
   chunk_size: number;
@@ -13,24 +14,13 @@ interface StrategyState {
   rerank_enabled: boolean;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
-
 async function fetchStrategy(): Promise<StrategyState> {
-  const res = await fetch(`${API_BASE}/api/knowledge/strategy`);
-  if (!res.ok) throw new Error("Failed to fetch strategy");
-  return res.json();
+  return strategy.get();
 }
 
 async function updateStrategy(patch: Partial<StrategyState>): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/knowledge/strategy`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(patch),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: "Update failed" }));
-    throw new Error(err.detail || "Update failed");
-  }
+  const data = await strategy.patch(patch as Record<string, unknown>);
+  if (!data.status) throw new Error("Update failed");
 }
 
 const defaults: StrategyState = {

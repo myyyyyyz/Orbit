@@ -16,6 +16,13 @@ export function ChatInterface() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
 
+  // 组件卸载时 abort 进行中的流式请求（避免对已卸载组件 setState）
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
   const handleSend = useCallback(async (content: string) => {
     const userMsg: Message = {
       id: `msg-${++messageIdRef.current}`,

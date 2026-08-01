@@ -71,11 +71,10 @@ def test_get_optional_user():
     assert user["tenant_id"] == "org_2"
 
 
-def test_decode_token_lru_cache():
-    """同一 token 重复验证走 LRU 缓存"""
-    auth_mod._decode_token.cache_clear()
+def test_verify_multiple_calls_consistent():
+    """多次验证同一 token 结果一致（原 lru_cache 测试替代）"""
     token = create_access_token("dave", 4)
-    verify_access_token(token)
-    verify_access_token(token)
-    info = auth_mod._decode_token.cache_info()
-    assert info.hits >= 1
+    p1 = verify_access_token(token)
+    p2 = verify_access_token(token)
+    assert p1 == p2
+    assert p1["sub"] == "dave"

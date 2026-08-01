@@ -11,7 +11,6 @@ JWT 认证中间件
 
 import os
 import logging
-import functools
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -54,28 +53,20 @@ def create_access_token(username: str, user_id: int, tenant_id: Optional[str] = 
     return jwt.encode(payload, _SECRET_KEY, algorithm=ALGORITHM)
 
 
-# ── Token 验证（带缓存）────────────────────────────
-
-@functools.lru_cache(maxsize=256)
-def _decode_token(token: str) -> Optional[dict]:
-    """
-    LRU 缓存的 JWT decode。
-    缓存命中时跳过 CPU 密集的签名验证。
-    Token 自身含 exp 字段，过期后 decode 会抛出 JWTError → 返回 None。
-    对于高频请求中同一 Token 的重复验证，缓存可显著减少开销。
-    """
-    try:
-        return jwt.decode(token, _SECRET_KEY, algorithms=[ALGORITHM])
-    except JWTError:
-        return None
-
+# ── Token 验证 ─────────────────────────────────────
 
 def verify_access_token(token: str) -> Optional[dict]:
     """
     验证 JWT Token，返回 payload 或 None。
     不抛异常——由调用方决定如何处理失败。
+
+    注意：不使用 lru_cache 缓存解码结果——JWT HS256 解码本身极快（微秒级），
+    缓存会引入安全风险（过期 Token 在缓存中被续命、内存 dump 泄露 payload）。
     """
-    return _decode_token(token)
+    try:
+        return jwt.decode(token, _SECRET_KEY, algorithms=[ALGORITHM])
+    except JWTError:
+        return None
 
 
 # ── FastAPI 依赖注入 ──────────────────────────────

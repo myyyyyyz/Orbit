@@ -1,6 +1,7 @@
 """搜索模块：向量检索 + 结果后处理（支持多租户）"""
 
 import time
+import threading
 from typing import Optional
 
 from ..config import settings
@@ -9,25 +10,29 @@ from ..store import get_collection
 
 # count 缓存（避免每次搜索都调用 O(n) 的 collection.count()）
 _count_cache: dict = {}  # {collection_name: {"value": int, "ts": float}}
+_count_lock = threading.Lock()
 
 
 def _get_cached_count(collection, name: str, ttl: float = 5.0) -> int:
     """获取缓存的 collection count，TTL 内复用"""
     now = time.time()
-    entry = _count_cache.get(name)
-    if entry and (now - entry["ts"]) < ttl:
-        return entry["value"]
+    with _count_lock:
+        entry = _count_cache.get(name)
+        if entry and (now - entry["ts"]) < ttl:
+            return entry["value"]
     count = collection.count()
-    _count_cache[name] = {"value": count, "ts": now}
+    with _count_lock:
+        _count_cache[name] = {"value": count, "ts": now}
     return count
 
 
 def _invalidate_count_cache(name: str = None):
     """失效 count 缓存（add/delete 后调用）"""
-    if name:
-        _count_cache.pop(name, None)
-    else:
-        _count_cache.clear()
+    with _count_lock:
+        if name:
+            _count_cache.pop(name, None)
+        else:
+            _count_cache.clear()
 
 
 def search(query: str, top_k: int = None, user_id: Optional[int] = None) -> list[dict]:

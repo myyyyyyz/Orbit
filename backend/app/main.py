@@ -68,8 +68,9 @@ _CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhos
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in _CORS_ORIGINS.split(",") if o.strip()],
-    allow_methods=["GET", "POST", "PATCH", "DELETE"],
-    allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-LLM-Model"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-LLM-Model", "X-Request-ID"],
 )
 
 # 注册路由

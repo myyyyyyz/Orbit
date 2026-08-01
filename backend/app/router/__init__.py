@@ -16,7 +16,7 @@ import re
 import os
 import logging
 from typing import Optional, List, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +39,7 @@ class RouteDecision(BaseModel):
     clarification_question: str = Field(default="", description="追问问题（needs_clarification=True 时）")
     intent: str = Field(default="balanced", description="识别的意图类型")
 
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 # ================================================================

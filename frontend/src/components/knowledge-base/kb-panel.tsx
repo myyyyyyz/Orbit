@@ -12,8 +12,6 @@ interface DocRecord {
   uploadedAt?: string;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
-
 export function KnowledgeBasePanel() {
   const [documents, setDocuments] = useState<DocRecord[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -24,23 +22,20 @@ export function KnowledgeBasePanel() {
 
   // Fetch existing documents on mount
   useEffect(() => {
-    fetch(`${API_BASE}/api/knowledge/search?q=&top_k=50`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.results) {
-          const seen = new Set<string>();
-          const docs: DocRecord[] = [];
-          for (const r of data.results) {
-            const fn = r.metadata?.filename || "unknown";
-            if (!seen.has(fn)) {
-              seen.add(fn);
-              docs.push({ filename: fn, status: "indexed" });
-            }
+    knowledge.search("", 50).then((data) => {
+      if (data.results) {
+        const seen = new Set<string>();
+        const docs: DocRecord[] = [];
+        for (const r of data.results) {
+          const fn = r.metadata?.source || "unknown";
+          if (!seen.has(fn)) {
+            seen.add(fn);
+            docs.push({ filename: fn, status: "indexed" });
           }
-          setDocuments(docs);
         }
-      })
-      .catch(() => setBackendError(true));
+        setDocuments(docs);
+      }
+    }).catch(() => setBackendError(true));
   }, []);
 
   const handleUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {

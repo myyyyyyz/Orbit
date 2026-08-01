@@ -1,4 +1,5 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
+export { API_BASE };
 
 function getStored(key: string): string | null {
   if (typeof window === "undefined") return null;
@@ -125,10 +126,16 @@ export const knowledge = {
     if (apiKey) headers["X-API-Key"] = apiKey;
     if (model) headers["X-LLM-Model"] = model;
 
+    // 60s 超时：长时间无响应不阻塞 UI
+    const timeoutId = setTimeout(() => {
+      onError?.("请求超时，请检查网络或 API Key 是否有效");
+    }, 60000);
+
     return fetch(`${API_BASE}/api/knowledge/ask/stream?${params}`, {
       headers,
       signal: abortSignal,
     }).then(async (response) => {
+      clearTimeout(timeoutId);
       if (!response.ok) {
         onError?.(`HTTP ${response.status}`);
         return;
@@ -171,6 +178,22 @@ export const knowledge = {
       }
     });
   },
+};
+
+// Strategy
+export const strategy = {
+  get: () =>
+    request<{
+      version: string;
+      chunk: { size: number; overlap: number; method: string };
+      embed: { model: string; backend: string };
+      retrieval: { top_k: number; method: string; rerank_enabled: boolean };
+    }>("/api/knowledge/strategy"),
+  patch: (data: Record<string, unknown>) =>
+    request<{ status: string; version: string; changes: unknown[] }>(
+      "/api/knowledge/strategy",
+      { method: "PATCH", body: JSON.stringify(data) }
+    ),
 };
 
 // Health

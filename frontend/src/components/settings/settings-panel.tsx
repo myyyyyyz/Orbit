@@ -20,8 +20,12 @@ function loadModels(): ModelConfig[] {
     const saved = localStorage.getItem("orbit_llm_models_v2");
     if (saved) return JSON.parse(saved) as ModelConfig[];
   } catch { /* ignore */ }
-  // migrate legacy
-  const legacyModels: string[] = JSON.parse(localStorage.getItem("orbit_llm_models") || '["deepseek-chat"]');
+  // migrate legacy（保护损坏的旧数据不崩溃）
+  let legacyModels: string[] = ["deepseek-chat"];
+  try {
+    const raw = localStorage.getItem("orbit_llm_models");
+    if (raw) legacyModels = JSON.parse(raw) as string[];
+  } catch { /* corrupted legacy data, fallback to default */ }
   const activeModel = localStorage.getItem("orbit_llm_active_model") || "deepseek-chat";
   return legacyModels.map((name) => ({
     name,
