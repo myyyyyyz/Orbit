@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 FileType = Literal["markdown", "text", "pdf", "docx", "xlsx", "unknown"]
 DecisionSource = Literal["agent", "rule", "fallback"]
 TableQuality = Literal["stable", "messy", "unknown"]
+AgentStatus = Literal["success", "unavailable", "error"]
 
 
 class CorpusProfile(BaseModel):
@@ -37,6 +38,18 @@ class StrategyDecision(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     reason: str = Field(min_length=1)
     requires_review: bool = False
+
+
+class AgentAttempt(BaseModel):
+    """Sanitized metadata and optional suggestion from one Agent call."""
+
+    model_config = ConfigDict(frozen=True)
+
+    status: AgentStatus
+    model: str
+    duration_ms: int = Field(ge=0)
+    suggestion: dict[str, Any] | None = None
+    error_category: str | None = None
 
 
 class PlannedDocument(BaseModel):
