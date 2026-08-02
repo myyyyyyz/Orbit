@@ -111,6 +111,15 @@ npm run dev -- -p 3000
 
 > API Key 仅保存在浏览器本地，前端通过 `X-API-Key` 请求头传递给后端，后端据此调用 LLM。
 
+Knowledge Agent 的文件夹规划由后端发起，复用以下 OpenAI-compatible 环境变量：
+
+| 环境变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `LLM_API_KEY` | 空 | Knowledge Agent 的 Bearer 凭据；为空时自动使用规则兜底 |
+| `LLM_BASE_URL` | `https://api.openai.com/v1/chat/completions` | OpenAI-compatible Chat Completions 地址 |
+| `LLM_MODEL` | `gpt-4o-mini` | Knowledge Agent 规划模型 |
+| `KNOWLEDGE_AGENT_TIMEOUT_SECONDS` | `20` | 单份文件的 Agent 调用超时秒数 |
+
 ### 4. 上传文档并对话
 
 - 左侧 **知识库** → 拖拽上传 PDF/MD/TXT
@@ -151,6 +160,7 @@ LLM 生成 → SSE 流式返回 → 前端渲染
 | `/api/knowledge/search` | GET | 语义搜索 |
 | `/api/knowledge/ask` | POST | RAG 问答 |
 | `/api/knowledge/ask/stream` | GET | SSE 流式问答 |
+| `/api/knowledge/plan-folder` | POST | 生成文件夹 RAG 策略 dry-run，不写向量库 |
 | `/api/knowledge/strategy` | GET/PATCH | RAG 策略管理 |
 | `/api/knowledge/logos` | POST | 对话总结 |
 | `/api/auth/register` | POST | 注册 (限流) |
@@ -219,6 +229,12 @@ curl -X POST http://localhost:8001/api/knowledge/ask \
 # 测试流式 SSE
 curl -N "http://localhost:8001/api/knowledge/ask/stream?q=hello" \
   -H "X-API-Key: sk-xxx"
+
+# 离线生成知识库策略计划（显式禁用 Agent，始终不写向量库）
+curl -X POST http://localhost:8001/api/knowledge/plan-folder \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"path":"fixtures","use_agent":false}'
 ```
 
 ## License
