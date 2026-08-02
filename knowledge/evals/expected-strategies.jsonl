@@ -1,0 +1,7 @@
+{"source":"clean-policy.md","expected_strategy_id":"markdown_hierarchical_v1","requires_review":false,"rationale":"Markdown 标题结构稳定","expected_signals":["heading_count"]}
+{"source":"clean-handbook.docx","expected_strategy_id":"docx_layout_aware_v1","requires_review":false,"rationale":"标题、表格与图片结构完整","expected_signals":["heading_count","table_count","image_count"]}
+{"source":"messy-notes.docx","expected_strategy_id":"docx_layout_aware_v1","requires_review":true,"rationale":"重复段落和混乱留白需要人工抽查","expected_signals":["image_count"]}
+{"source":"text-report.pdf","expected_strategy_id":"pdf_text_hierarchical_v1","requires_review":false,"rationale":"文本提取率达到可用阈值","expected_signals":["page_count","text_extraction_ratio"]}
+{"source":"scanned-notice.pdf","expected_strategy_id":"pdf_ocr_review_v1","requires_review":true,"rationale":"文本提取率过低，需要 OCR 与人工复核","expected_signals":["text_extraction_ratio","image_count"]}
+{"source":"clean-projects.xlsx","expected_strategy_id":"spreadsheet_structured_v1","requires_review":false,"rationale":"单表头和稳定行结构适合结构化切分","expected_signals":["sheet_count","table_quality"]}
+{"source":"messy-operations.xlsx","expected_strategy_id":"spreadsheet_structured_v1","requires_review":true,"rationale":"多工作表、合并单元格与空行需要人工抽查","expected_signals":["sheet_count","merged_cell_count","blank_row_count"]}
