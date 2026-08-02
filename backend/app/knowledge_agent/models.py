@@ -57,6 +57,7 @@ class PlannedDocument(BaseModel):
 
     profile: CorpusProfile
     decision: StrategyDecision
+    agent_attempt: AgentAttempt | None = None
 
 
 class FolderPlan(BaseModel):

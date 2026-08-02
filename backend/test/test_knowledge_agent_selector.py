@@ -50,3 +50,31 @@ def test_valid_compatible_agent_strategy_is_accepted():
 
     assert decision.decision_source == "agent"
     assert decision.confidence == 0.88
+
+
+def test_agent_can_escalate_review_for_messy_spreadsheet():
+    decision = select_strategy(
+        make_profile(file_type="xlsx"),
+        {
+            "strategy_id": "spreadsheet_structured_v1",
+            "confidence": 0.9,
+            "reason": "结构混乱，需要抽查",
+            "requires_review": True,
+        },
+    )
+
+    assert decision.requires_review is True
+
+
+def test_agent_cannot_suppress_catalog_required_review():
+    decision = select_strategy(
+        make_profile(text_extraction_ratio=0.01),
+        {
+            "strategy_id": "pdf_ocr_review_v1",
+            "confidence": 0.9,
+            "reason": "扫描件需要 OCR",
+            "requires_review": False,
+        },
+    )
+
+    assert decision.requires_review is True

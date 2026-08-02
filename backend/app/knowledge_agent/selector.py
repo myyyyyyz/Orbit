@@ -38,11 +38,14 @@ def _validated_agent_decision(
     strategy_id = suggestion.get("strategy_id")
     confidence = suggestion.get("confidence")
     reason = suggestion.get("reason")
+    requested_review = suggestion.get("requires_review", False)
     if not isinstance(strategy_id, str) or not is_compatible(strategy_id, profile):
         return None
     if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
         return None
     if not 0.0 <= float(confidence) <= 1.0 or not isinstance(reason, str) or not reason.strip():
+        return None
+    if not isinstance(requested_review, bool):
         return None
 
     strategy = STRATEGY_CATALOG[strategy_id]
@@ -51,7 +54,7 @@ def _validated_agent_decision(
         decision_source="agent",
         confidence=float(confidence),
         reason=reason.strip(),
-        requires_review=strategy.requires_review,
+        requires_review=strategy.requires_review or requested_review,
     )
 
 
