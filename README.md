@@ -12,6 +12,43 @@
 
 **星轨（Orbit）** 是一套面向中小微企业和个人用户的 AI Agent 端到端系统，让用户只需描述"想做什么"，AI 即可自主完成 **需求对齐 → 规划 → 编码 → 审查 → 交付** 的全流程闭环。
 
+## Knowledge Agent（实验性）
+
+Knowledge Agent 面向企业文件夹中的多格式知识资产，把传统的“上传后统一切片”升级为可审计的策略规划流程：
+
+```text
+Markdown / Word / Excel / PDF
+        ↓
+确定性文件画像 + 有界内容证据
+        ↓
+Knowledge Agent 推荐 RAG 策略
+        ↓
+策略目录校验 + 规则兜底
+        ↓
+FolderPlan → KnowledgeRun → 人工审批
+```
+
+当前已完成：
+
+- 七份真实多格式测试文档，覆盖结构整齐、格式混乱、表格、图片、文本 PDF 和扫描 PDF。
+- Markdown、DOCX、XLSX、文本 PDF、扫描 PDF 的确定性文件画像。
+- OpenAI-compatible Knowledge Agent Adapter；缺少密钥、超时或非法结果时按文件规则兜底。
+- Agent 输出只能选择现有策略目录中的策略，强制复核要求不能被 Agent 取消。
+- `KnowledgeRun` 状态机、租户隔离、原子审批和 SQLite 审计记录。
+- 审批时重新比较完整文件清单与内容哈希；新增、删除、重命名或修改文件都会使计划失效。
+
+> **当前边界：** Knowledge Agent 目前支持策略规划和安全审批，仍保持 `vector_store_writes=0`，不会创建 Chunk、Embedding 或向量记录。第三阶段 3.2 将接入多格式策略 Executor 与按 `run_id` 隔离的 staging collection；评测、发布和回滚将在后续子阶段完成。
+
+测试资产位于：
+
+```text
+knowledge/
+├── fixtures/                  # DOCX、XLSX、PDF、Markdown 多格式测试集
+└── evals/
+    ├── expected-strategies.jsonl
+    └── questions.jsonl
+```
+
 ### 架构总览
 
 ```
@@ -61,6 +98,7 @@ Orbit/
 │       ├── chunk/             # 语义切割 (中文适配)
 │       ├── ingest/            # 文件解析 (PDF/MD/TXT)
 │       ├── store/             # ChromaDB 存储
+│       ├── knowledge_agent/   # 文件画像、策略规划、审批与审计
 │       ├── router/            # 模型路由 (fast/balanced/strong)
 │       ├── cache/             # 语义缓存 (736x 加速)
 │       ├── multitenant/       # 多租户隔离
@@ -73,6 +111,10 @@ Orbit/
 │   ├── scenes/                # 场景定义
 │   ├── skills/                # 12 个集成 Skill
 │   └── run-loop.sh            # CLI Runner
+│
+├── knowledge/                 # Knowledge Agent 测试资产与评测标签
+│   ├── fixtures/              # 多格式真实文档
+│   └── evals/                 # 期望策略与检索问题
 │
 ├── data/                      # 运行时数据 (gitignore)
 │   ├── chroma_db/             # ChromaDB 向量存储
