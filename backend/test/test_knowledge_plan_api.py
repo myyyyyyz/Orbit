@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -7,6 +8,9 @@ from app.api import knowledge_plan
 from app.knowledge_agent.adapter import OpenAICompatibleKnowledgeAgent
 from app.knowledge_agent.models import AgentAttempt
 from app.middleware.auth import get_current_user
+
+
+SOURCE_KNOWLEDGE = Path(__file__).resolve().parents[2] / "knowledge"
 
 
 class StaticAgent:
@@ -88,3 +92,73 @@ def test_plan_folder_endpoint_can_disable_agent(tmp_path, monkeypatch):
     payload = response.json()
     assert payload["vector_store_writes"] == 0
     assert all(document["agent_attempt"] is None for document in payload["documents"])
+
+
+def test_run_can_be_read_and_approved_without_vector_writes(tmp_path, monkeypatch):
+    knowledge_root = tmp_path / "knowledge"
+    shutil.copytree(SOURCE_KNOWLEDGE / "fixtures", knowledge_root / "fixtures")
+    app = FastAPI()
+    app.include_router(knowledge_plan.router)
+    app.dependency_overrides[get_current_user] = lambda: {"user_id": 42}
+    monkeypatch.setattr(knowledge_plan, "_KNOWLEDGE_ROOT", knowledge_root)
+    monkeypatch.setattr(knowledge_plan, "_database_path", lambda: tmp_path / "audit.sqlite3")
+
+    planned = TestClient(app).post(
+        "/api/knowledge/plan-folder",
+        json={"path": "fixtures", "use_agent": False},
+    )
+    run_id = planned.json()["run_id"]
+
+    saved = TestClient(app).get(f"/api/knowledge/runs/{run_id}")
+    approved = TestClient(app).post(f"/api/knowledge/runs/{run_id}/approve")
+
+    assert saved.status_code == 200
+    assert saved.json()["status"] == "review_required"
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "approved"
+    assert approved.json()["vector_store_writes"] == 0
+
+
+def test_approve_endpoint_returns_conflict_after_source_change(tmp_path, monkeypatch):
+    knowledge_root = tmp_path / "knowledge"
+    shutil.copytree(SOURCE_KNOWLEDGE / "fixtures", knowledge_root / "fixtures")
+    app = FastAPI()
+    app.include_router(knowledge_plan.router)
+    app.dependency_overrides[get_current_user] = lambda: {"user_id": 42}
+    monkeypatch.setattr(knowledge_plan, "_KNOWLEDGE_ROOT", knowledge_root)
+    monkeypatch.setattr(knowledge_plan, "_database_path", lambda: tmp_path / "audit.sqlite3")
+    client = TestClient(app)
+    planned = client.post(
+        "/api/knowledge/plan-folder",
+        json={"path": "fixtures", "use_agent": False},
+    )
+    run_id = planned.json()["run_id"]
+    (knowledge_root / "fixtures" / "clean-policy.md").write_text(
+        "changed", encoding="utf-8"
+    )
+
+    response = client.post(f"/api/knowledge/runs/{run_id}/approve")
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["status"] == "invalidated"
+
+
+def test_run_endpoint_hides_other_tenants_runs(tmp_path, monkeypatch):
+    knowledge_root = tmp_path / "knowledge"
+    shutil.copytree(SOURCE_KNOWLEDGE / "fixtures", knowledge_root / "fixtures")
+    app = FastAPI()
+    app.include_router(knowledge_plan.router)
+    current = {"user_id": 42}
+    app.dependency_overrides[get_current_user] = lambda: current
+    monkeypatch.setattr(knowledge_plan, "_KNOWLEDGE_ROOT", knowledge_root)
+    monkeypatch.setattr(knowledge_plan, "_database_path", lambda: tmp_path / "audit.sqlite3")
+    client = TestClient(app)
+    planned = client.post(
+        "/api/knowledge/plan-folder",
+        json={"path": "fixtures", "use_agent": False},
+    )
+    current["user_id"] = 99
+
+    response = client.get(f"/api/knowledge/runs/{planned.json()['run_id']}")
+
+    assert response.status_code == 404

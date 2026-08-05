@@ -161,6 +161,8 @@ LLM 生成 → SSE 流式返回 → 前端渲染
 | `/api/knowledge/ask` | POST | RAG 问答 |
 | `/api/knowledge/ask/stream` | GET | SSE 流式问答 |
 | `/api/knowledge/plan-folder` | POST | 生成文件夹 RAG 策略 dry-run，不写向量库 |
+| `/api/knowledge/runs/{run_id}` | GET | 查询当前用户的 KnowledgeRun 状态 |
+| `/api/knowledge/runs/{run_id}/approve` | POST | 校验源文件未变化后批准计划，仍不写向量库 |
 | `/api/knowledge/strategy` | GET/PATCH | RAG 策略管理 |
 | `/api/knowledge/logos` | POST | 对话总结 |
 | `/api/auth/register` | POST | 注册 (限流) |
@@ -235,6 +237,18 @@ curl -X POST http://localhost:8001/api/knowledge/plan-folder \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{"path":"fixtures","use_agent":false}'
+```
+
+规划响应中的 `status` 为 `planned` 或 `review_required`。批准前服务会重新扫描完整文件清单并比较内容哈希；文件新增、删除、重命名或内容变化都会将运行标记为 `invalidated`，需要重新生成计划。
+
+```bash
+# 查询运行状态
+curl http://localhost:8001/api/knowledge/runs/<run_id> \
+  -H "Authorization: Bearer <token>"
+
+# 批准未变化的计划；第三阶段 3.1 仍保持零向量写入
+curl -X POST http://localhost:8001/api/knowledge/runs/<run_id>/approve \
+  -H "Authorization: Bearer <token>"
 ```
 
 ## License
