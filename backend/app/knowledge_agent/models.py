@@ -7,6 +7,18 @@ FileType = Literal["markdown", "text", "pdf", "docx", "xlsx", "unknown"]
 DecisionSource = Literal["agent", "rule", "fallback"]
 TableQuality = Literal["stable", "messy", "unknown"]
 AgentStatus = Literal["success", "unavailable", "error"]
+RunStatus = Literal[
+    "planned",
+    "review_required",
+    "approved",
+    "indexing",
+    "evaluating",
+    "promoted",
+    "rejected",
+    "failed",
+    "rolled_back",
+    "invalidated",
+]
 
 
 class CorpusProfile(BaseModel):
@@ -64,7 +76,26 @@ class FolderPlan(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     run_id: str
+    folder_path: str
+    status: RunStatus
     dry_run: Literal[True] = True
     vector_store_writes: Literal[0] = 0
     document_count: int = Field(ge=0)
     documents: tuple[PlannedDocument, ...]
+
+
+class KnowledgeRunRecord(BaseModel):
+    """A tenant-scoped persisted summary of one KnowledgeRun."""
+
+    model_config = ConfigDict(frozen=True)
+
+    run_id: str
+    user_id: int | None = None
+    folder_path: str
+    status: RunStatus
+    dry_run: bool
+    vector_store_writes: int = Field(ge=0)
+    document_count: int = Field(ge=0)
+    created_at: str
+    updated_at: str | None = None
+    approved_at: str | None = None
