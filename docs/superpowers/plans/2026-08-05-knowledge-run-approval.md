@@ -310,4 +310,4 @@ git commit -m "feat: expose knowledge run approval"
 
 - [x] 运行第二阶段 25 个 Knowledge Agent 测试和本计划新增测试。
 - [x] 确认 `backend/.pydeps/`、已有 PR 文档删除和未跟踪中文总结没有进入暂存区。
-- [ ] 推送 `dev/knowledge`，让现有草稿 PR 自动更新。
+- [x] 推送 `dev/knowledge`，让现有草稿 PR 自动更新。
