@@ -11,6 +11,7 @@ from .evidence import read_evidence
 from .models import AgentAttempt, CorpusProfile, FolderPlan, PlannedDocument
 from .profiler import scan_folder
 from .repository import save_plan
+from .run_state import initial_status
 from .selector import select_strategy
 
 
@@ -58,6 +59,10 @@ def plan_folder(
         )
     plan = FolderPlan(
         run_id=uuid4().hex,
+        folder_path=folder.relative_to(knowledge_root).as_posix(),
+        status=initial_status(
+            document.decision.requires_review for document in documents
+        ),
         document_count=len(documents),
         documents=tuple(documents),
     )
