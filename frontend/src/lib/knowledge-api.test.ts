@@ -27,12 +27,12 @@ describe("Knowledge API", () => {
     await api.rollback("r1");
 
     expect(fetcher.mock.calls.map(([url]) => new URL(url).pathname)).toEqual([
-      "/api/knowledge/plan-folder",
-      "/api/knowledge/runs/r1/approve",
-      "/api/knowledge/runs/r1/execute",
-      "/api/knowledge/runs/r1/evaluate",
-      "/api/knowledge/runs/r1/promote",
-      "/api/knowledge/runs/r1/rollback",
+      "/api/v1/knowledge/plan-folder",
+      "/api/v1/knowledge/runs/r1/approve",
+      "/api/v1/knowledge/runs/r1/execute",
+      "/api/v1/knowledge/runs/r1/evaluate",
+      "/api/v1/knowledge/runs/r1/promote",
+      "/api/v1/knowledge/runs/r1/rollback",
     ]);
     for (const [, options] of fetcher.mock.calls) {
       expect(options.headers.Authorization).toBe("Bearer token-7");
@@ -80,9 +80,9 @@ describe("Knowledge API", () => {
       const parsed = new URL(url);
       return `${parsed.pathname}${parsed.search}`;
     })).toEqual([
-      "/api/knowledge/runs?limit=20",
-      "/api/knowledge/runs/r1/evaluation",
-      "/api/knowledge/active-version",
+      "/api/v1/knowledge/runs?limit=20",
+      "/api/v1/knowledge/runs/r1/evaluation",
+      "/api/v1/knowledge/active-version",
     ]);
   });
 
@@ -96,9 +96,9 @@ describe("Knowledge API", () => {
     await api.completeImport("i/1");
 
     expect(fetcher.mock.calls.map(([url]) => new URL(url).pathname)).toEqual([
-      "/api/knowledge/imports",
-      "/api/knowledge/imports/i%2F1/files",
-      "/api/knowledge/imports/i%2F1/complete",
+      "/api/v1/knowledge/imports",
+      "/api/v1/knowledge/imports/i%2F1/files",
+      "/api/v1/knowledge/imports/i%2F1/complete",
     ]);
     const upload = fetcher.mock.calls[1][1];
     expect(upload.body).toBeInstanceOf(FormData);

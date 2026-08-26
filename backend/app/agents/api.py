@@ -18,6 +18,7 @@ from typing import Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from ..config import DATA_DIR
 from ..middleware.auth import get_optional_user
 from ..stream.sse import _sse
 from . import db
@@ -300,7 +301,7 @@ def api_memory_scan(
     root = (request.query_params.get("root") or "").strip()
     if not root:
         root = os.getenv("FILE_MEMORY_ROOT", "") or os.path.join(
-            os.path.dirname(__file__), "..", "..", "..", "data", "memory"
+            DATA_DIR, "memory"
         )
     files = scan_memory_files(root)
     return {
@@ -334,7 +335,7 @@ async def api_memory_select(
     root = (body.get("root") or "").strip()
     if not root:
         root = os.getenv("FILE_MEMORY_ROOT", "") or os.path.join(
-            os.path.dirname(__file__), "..", "..", "..", "data", "memory"
+            DATA_DIR, "memory"
         )
     api_key = request.headers.get("X-API-Key") or None
     model = (body.get("model") or "").strip() or request.headers.get("X-LLM-Model") or None

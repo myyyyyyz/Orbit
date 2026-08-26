@@ -14,14 +14,13 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from typing import Optional
 
+from ..config import DATA_DIR
 from ..middleware.auth import get_optional_user
 
 router = APIRouter(prefix="/api/v1/knowledge", tags=["usage"])
 
-# 用量记录文件路径
-USAGE_LOG_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "..", "..", "..", "data", "usage.jsonl"
-)
+# 用量记录文件路径（统一由 config.DATA_DIR 解析，支持 DATA_DIR 环境变量覆盖）
+USAGE_LOG_PATH = os.path.join(DATA_DIR, "usage.jsonl")
 
 
 class ModelUsage(BaseModel):

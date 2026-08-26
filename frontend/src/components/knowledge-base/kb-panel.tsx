@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { Upload, FileText, Search, Trash2, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { cn, formatSize } from "@/lib/utils";
-import { knowledge, API_BASE } from "@/lib/api";
+import { knowledge } from "@/lib/api";
 import { KnowledgeWorkbench } from "@/components/knowledge-workbench/knowledge-workbench";
 
 interface DocRecord {
@@ -90,9 +90,10 @@ function LegacyKnowledgeBasePanel() {
 
   const handleDelete = useCallback((filename: string) => {
     setDocuments((prev) => prev.filter((d) => d.filename !== filename));
-    // Attempt backend delete (best-effort)
-    fetch(`${API_BASE}/api/knowledge/delete?filename=${encodeURIComponent(filename)}`, { method: "DELETE" })
-      .catch(() => {/* may not be supported */});
+    // 后端按 source 元数据删除该文档的全部 chunk
+    knowledge.deleteSource(filename).catch(() => {
+      /* best-effort：失败不阻塞 UI，刷新后可见真实状态 */
+    });
   }, []);
 
   return (

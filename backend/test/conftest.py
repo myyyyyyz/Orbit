@@ -41,11 +41,27 @@ import app.memory.db as memory_db  # noqa: E402
 memory_db.DB_PATH = os.path.join(TEST_ROOT, "memory.db")
 
 
-# ── 状态清理：每个测试后清空 ChromaDB 全局 collection 与语义缓存 ──
+# ── 状态清理：每个测试后清空共享状态 ──
+#
+# 分支锁写在 SQLite 的 global_switches 表，所有 loop 测试若共享同一
+# project_dir 则锁 key 相同，残留锁会让后续 loop 被 skip（status=failed）。
+# 根治手段是让每个 loop 测试使用唯一 project_dir（见 unique_project_dir
+# fixture），此处的清理作为兜底。
 
-@pytest.fixture(autouse=True)
-def _clean_state():
-    yield
+def _purge_branch_locks() -> None:
+    """删除全部残留分支锁（所有 loop 测试共享 project_dir=""，锁 key 相同）。"""
+    try:
+        from app.agents import db as agents_db
+        conn = agents_db._get_db()
+        conn.execute("DELETE FROM global_switches WHERE key LIKE 'branch-lock:%'")
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def _purge_collections_and_cache() -> None:
+    """清空语义缓存与 ChromaDB collection，并同步失效 count 缓存。"""
     from app.cache import clear as cache_clear
     cache_clear()
     try:
@@ -60,16 +76,13 @@ def _clean_state():
     # 否则空库判断失效 → n_results=0 的 query 报错
     from app.search import _invalidate_count_cache
     _invalidate_count_cache()
-    # 清理 Agent Loop 分支锁（P1-5）：所有 loop 测试共享 project_dir="",
-    # 分支锁 key 相同，残留锁会导致后续 loop 被 skip 而失败
-    try:
-        from app.agents import db as agents_db
-        conn = agents_db._get_db()
-        conn.execute("DELETE FROM global_switches WHERE key LIKE 'branch-lock:%'")
-        conn.commit()
-        conn.close()
-    except Exception:
-        pass
+
+
+@pytest.fixture(autouse=True)
+def _clean_state():
+    yield
+    _purge_collections_and_cache()
+    _purge_branch_locks()
 
 
 @pytest.fixture(scope="session")

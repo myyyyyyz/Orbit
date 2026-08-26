@@ -91,7 +91,7 @@ def test_plan_folder_endpoint_requires_authentication():
     app = FastAPI()
     app.include_router(knowledge_plan.router)
 
-    response = TestClient(app).post("/api/knowledge/plan-folder", json={"path": "fixtures"})
+    response = TestClient(app).post("/api/v1/knowledge/plan-folder", json={"path": "fixtures"})
 
     assert response.status_code == 401
 
@@ -100,7 +100,7 @@ def test_run_list_endpoint_requires_authentication():
     app = FastAPI()
     app.include_router(knowledge_plan.router)
 
-    response = TestClient(app).get("/api/knowledge/runs")
+    response = TestClient(app).get("/api/v1/knowledge/runs")
 
     assert response.status_code == 401
 
@@ -114,11 +114,11 @@ def test_run_list_endpoint_returns_only_current_tenant_runs(tmp_path, monkeypatc
     )
     client = TestClient(app)
     planned = client.post(
-        "/api/knowledge/plan-folder",
+        "/api/v1/knowledge/plan-folder",
         json={"path": "fixtures", "use_agent": False},
     ).json()
 
-    response = client.get("/api/knowledge/runs", params={"limit": 20})
+    response = client.get("/api/v1/knowledge/runs", params={"limit": 20})
 
     assert response.status_code == 200
     assert [item["run_id"] for item in response.json()["items"]] == [planned["run_id"]]
@@ -134,7 +134,7 @@ def test_run_list_endpoint_rejects_invalid_cursor(tmp_path, monkeypatch):
     )
 
     response = TestClient(app).get(
-        "/api/knowledge/runs", params={"cursor": "invalid"}
+        "/api/v1/knowledge/runs", params={"cursor": "invalid"}
     )
 
     assert response.status_code == 400
@@ -152,7 +152,7 @@ def test_plan_folder_endpoint_returns_dry_run_without_vector_writes(tmp_path, mo
         classmethod(lambda cls: StaticAgent()),
     )
 
-    response = TestClient(app).post("/api/knowledge/plan-folder", json={"path": "fixtures"})
+    response = TestClient(app).post("/api/v1/knowledge/plan-folder", json={"path": "fixtures"})
 
     assert response.status_code == 200
     payload = response.json()
@@ -178,7 +178,7 @@ def test_plan_folder_endpoint_can_disable_agent(tmp_path, monkeypatch):
     )
 
     response = TestClient(app).post(
-        "/api/knowledge/plan-folder",
+        "/api/v1/knowledge/plan-folder",
         json={"path": "fixtures", "use_agent": False},
     )
 
@@ -198,13 +198,13 @@ def test_run_can_be_read_and_approved_without_vector_writes(tmp_path, monkeypatc
     monkeypatch.setattr(knowledge_plan, "_database_path", lambda: tmp_path / "audit.sqlite3")
 
     planned = TestClient(app).post(
-        "/api/knowledge/plan-folder",
+        "/api/v1/knowledge/plan-folder",
         json={"path": "fixtures", "use_agent": False},
     )
     run_id = planned.json()["run_id"]
 
-    saved = TestClient(app).get(f"/api/knowledge/runs/{run_id}")
-    approved = TestClient(app).post(f"/api/knowledge/runs/{run_id}/approve")
+    saved = TestClient(app).get(f"/api/v1/knowledge/runs/{run_id}")
+    approved = TestClient(app).post(f"/api/v1/knowledge/runs/{run_id}/approve")
 
     assert saved.status_code == 200
     assert saved.json()["status"] == "review_required"
@@ -226,13 +226,13 @@ def test_planned_run_detail_restores_documents_for_current_tenant(tmp_path, monk
     )
     client = TestClient(app)
     planned = client.post(
-        "/api/knowledge/plan-folder",
+        "/api/v1/knowledge/plan-folder",
         json={"path": "fixtures", "use_agent": False},
     ).json()
 
-    restored = client.get(f"/api/knowledge/runs/{planned['run_id']}/plan")
+    restored = client.get(f"/api/v1/knowledge/runs/{planned['run_id']}/plan")
     current["user_id"] = 99
-    hidden = client.get(f"/api/knowledge/runs/{planned['run_id']}/plan")
+    hidden = client.get(f"/api/v1/knowledge/runs/{planned['run_id']}/plan")
 
     assert restored.status_code == 200
     assert restored.json() == planned
@@ -249,7 +249,7 @@ def test_approve_endpoint_returns_conflict_after_source_change(tmp_path, monkeyp
     monkeypatch.setattr(knowledge_plan, "_database_path", lambda: tmp_path / "audit.sqlite3")
     client = TestClient(app)
     planned = client.post(
-        "/api/knowledge/plan-folder",
+        "/api/v1/knowledge/plan-folder",
         json={"path": "fixtures", "use_agent": False},
     )
     run_id = planned.json()["run_id"]
@@ -257,7 +257,7 @@ def test_approve_endpoint_returns_conflict_after_source_change(tmp_path, monkeyp
         "changed", encoding="utf-8"
     )
 
-    response = client.post(f"/api/knowledge/runs/{run_id}/approve")
+    response = client.post(f"/api/v1/knowledge/runs/{run_id}/approve")
 
     assert response.status_code == 409
     assert response.json()["detail"]["status"] == "invalidated"
@@ -274,12 +274,12 @@ def test_run_endpoint_hides_other_tenants_runs(tmp_path, monkeypatch):
     monkeypatch.setattr(knowledge_plan, "_database_path", lambda: tmp_path / "audit.sqlite3")
     client = TestClient(app)
     planned = client.post(
-        "/api/knowledge/plan-folder",
+        "/api/v1/knowledge/plan-folder",
         json={"path": "fixtures", "use_agent": False},
     )
     current["user_id"] = 99
 
-    response = client.get(f"/api/knowledge/runs/{planned.json()['run_id']}")
+    response = client.get(f"/api/v1/knowledge/runs/{planned.json()['run_id']}")
 
     assert response.status_code == 404
 
@@ -298,13 +298,13 @@ def test_approved_run_can_execute_to_evaluating(tmp_path, monkeypatch):
     monkeypatch.setattr(knowledge_plan, "StagingStore", lambda: store)
     client = TestClient(app)
     planned = client.post(
-        "/api/knowledge/plan-folder",
+        "/api/v1/knowledge/plan-folder",
         json={"path": "fixtures", "use_agent": False},
     )
     run_id = planned.json()["run_id"]
-    assert client.post(f"/api/knowledge/runs/{run_id}/approve").status_code == 200
+    assert client.post(f"/api/v1/knowledge/runs/{run_id}/approve").status_code == 200
 
-    response = client.post(f"/api/knowledge/runs/{run_id}/execute")
+    response = client.post(f"/api/v1/knowledge/runs/{run_id}/execute")
 
     assert response.status_code == 200
     assert response.json()["status"] == "evaluating"
@@ -324,12 +324,12 @@ def test_unapproved_run_returns_conflict_without_initializing_chroma(tmp_path, m
     )
     client = TestClient(app)
     planned = client.post(
-        "/api/knowledge/plan-folder",
+        "/api/v1/knowledge/plan-folder",
         json={"path": "fixtures", "use_agent": False},
     )
 
     response = client.post(
-        f"/api/knowledge/runs/{planned.json()['run_id']}/execute"
+        f"/api/v1/knowledge/runs/{planned.json()['run_id']}/execute"
     )
 
     assert response.status_code == 409
@@ -371,11 +371,11 @@ def test_evaluate_report_promote_active_and_rollback_endpoints(tmp_path, monkeyp
     monkeypatch.setattr(knowledge_plan, "StagingStore", lambda: object())
     client = TestClient(app)
 
-    assert client.post("/api/knowledge/runs/run-1/evaluate").json() == report.model_dump(mode="json")
-    assert client.get("/api/knowledge/runs/run-1/evaluation").status_code == 200
-    assert client.post("/api/knowledge/runs/run-1/promote").json()["generation"] == 1
-    assert client.get("/api/knowledge/active-version").json()["collection_name"] == "kr_active"
-    assert client.post("/api/knowledge/runs/run-1/rollback").json()["legacy"] is True
+    assert client.post("/api/v1/knowledge/runs/run-1/evaluate").json() == report.model_dump(mode="json")
+    assert client.get("/api/v1/knowledge/runs/run-1/evaluation").status_code == 200
+    assert client.post("/api/v1/knowledge/runs/run-1/promote").json()["generation"] == 1
+    assert client.get("/api/v1/knowledge/active-version").json()["collection_name"] == "kr_active"
+    assert client.post("/api/v1/knowledge/runs/run-1/rollback").json()["legacy"] is True
 
 
 def test_evaluation_infrastructure_failure_returns_422(tmp_path, monkeypatch):
@@ -400,7 +400,7 @@ def test_evaluation_infrastructure_failure_returns_422(tmp_path, monkeypatch):
         ),
     )
 
-    response = TestClient(app).post("/api/knowledge/runs/run-1/evaluate")
+    response = TestClient(app).post("/api/v1/knowledge/runs/run-1/evaluate")
 
     assert response.status_code == 422
     assert response.json()["detail"]["error_category"] == "storage_error"

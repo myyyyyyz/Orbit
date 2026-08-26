@@ -1,5 +1,6 @@
 """Authenticated local-folder imports for the governed Knowledge workflow."""
 
+import os
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
@@ -18,8 +19,12 @@ from ..knowledge_agent.imports import (
 from ..middleware.auth import get_current_user
 
 
-router = APIRouter(prefix="/api/knowledge/imports", tags=["knowledge-imports"])
-_KNOWLEDGE_ROOT = Path(__file__).resolve().parents[3] / "knowledge"
+router = APIRouter(prefix="/api/v1/knowledge/imports", tags=["knowledge-imports"])
+# 与 knowledge_plan 共享同一解析规则：KNOWLEDGE_ROOT 环境变量优先
+_KNOWLEDGE_ROOT = Path(
+    os.getenv("KNOWLEDGE_ROOT")
+    or Path(__file__).resolve().parents[3] / "knowledge"
+).resolve()
 
 
 def _database_path() -> Path:

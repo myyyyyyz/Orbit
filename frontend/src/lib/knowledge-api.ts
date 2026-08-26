@@ -73,7 +73,7 @@ export function createKnowledgeApi(fetcher: Fetcher = fetch): KnowledgeApi {
   }
 
   const runPath = (runId: string, suffix = "") =>
-    `/api/knowledge/runs/${encodeURIComponent(runId)}${suffix}`;
+    `/api/v1/knowledge/runs/${encodeURIComponent(runId)}${suffix}`;
   const action = <T>(runId: string, suffix: string) =>
     request<T>(runPath(runId, suffix), { method: "POST" });
 
@@ -81,25 +81,25 @@ export function createKnowledgeApi(fetcher: Fetcher = fetch): KnowledgeApi {
     listRuns(limit = 20, cursor) {
       const params = new URLSearchParams({ limit: String(limit) });
       if (cursor) params.set("cursor", cursor);
-      return request<KnowledgeRunPage>(`/api/knowledge/runs?${params}`);
+      return request<KnowledgeRunPage>(`/api/v1/knowledge/runs?${params}`);
     },
     getRun: (runId) => request<KnowledgeRun>(runPath(runId)),
     getPlan: (runId) => request<FolderPlan>(runPath(runId, "/plan")),
-    createImport: () => request<ImportBatch>("/api/knowledge/imports", { method: "POST" }),
+    createImport: () => request<ImportBatch>("/api/v1/knowledge/imports", { method: "POST" }),
     uploadImportFile(importId, file, relativePath) {
       const form = new FormData();
       form.set("relative_path", relativePath);
       form.set("file", file);
-      return request<ImportBatch>(`/api/knowledge/imports/${encodeURIComponent(importId)}/files`, {
+      return request<ImportBatch>(`/api/v1/knowledge/imports/${encodeURIComponent(importId)}/files`, {
         method: "POST",
         body: form,
       });
     },
-    completeImport: (importId) => request<ImportBatch>(`/api/knowledge/imports/${encodeURIComponent(importId)}/complete`, { method: "POST" }),
-    getImport: (importId) => request<ImportBatch>(`/api/knowledge/imports/${encodeURIComponent(importId)}`),
-    deleteImport: (importId) => request<void>(`/api/knowledge/imports/${encodeURIComponent(importId)}`, { method: "DELETE" }),
+    completeImport: (importId) => request<ImportBatch>(`/api/v1/knowledge/imports/${encodeURIComponent(importId)}/complete`, { method: "POST" }),
+    getImport: (importId) => request<ImportBatch>(`/api/v1/knowledge/imports/${encodeURIComponent(importId)}`),
+    deleteImport: (importId) => request<void>(`/api/v1/knowledge/imports/${encodeURIComponent(importId)}`, { method: "DELETE" }),
     planFolder: (input) =>
-      request<FolderPlan>("/api/knowledge/plan-folder", {
+      request<FolderPlan>("/api/v1/knowledge/plan-folder", {
         method: "POST",
         body: JSON.stringify(input),
       }),
@@ -109,7 +109,7 @@ export function createKnowledgeApi(fetcher: Fetcher = fetch): KnowledgeApi {
     getEvaluation: (runId) =>
       request<EvaluationReport>(runPath(runId, "/evaluation")),
     getActiveVersion: () =>
-      request<ActiveIndexVersion>("/api/knowledge/active-version"),
+      request<ActiveIndexVersion>("/api/v1/knowledge/active-version"),
     promote: (runId) => action<ActiveIndexVersion>(runId, "/promote"),
     rollback: (runId) => action<ActiveIndexVersion>(runId, "/rollback"),
   };
