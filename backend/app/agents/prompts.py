@@ -1,12 +1,18 @@
-"""Agent 角色 Prompt 资产（JSON 输出版）。
+"""Agent 角色 Prompt 资产（JSON 输出版）—— 事件版 loop 的唯一权威 Prompt。
+
+P0（单一核心 + 双壳）权威映射:
+- 本文件是事件版（backend/app/agents/）的 Prompt 唯一事实源。
+- agent-loop/agents/*.md 是协议文档（markdown 文件接力版），吸收的核心要求与本文件一致：
+  planner → 影响面分析 / test_level / 可执行 verify
+  builder → 严格按计划 / 不评价自己 / 记录 Plan 偏离
+  reviewer → 两阶段审 / 证据驱动 / 不信任 Builder 自信 / 升级标准
+- 修改角色核心要求时，以本文件为准，并同步 agent-loop/agents/*.md 协议文档。
+- run-loop.sh（offline 壳）从 agents/*.md 读取，行为以本文件为参照。
 
 为何不直接复用 agent-loop/agents/*.md:
 - 原版 prompt 要求 Agent "写入 loop-plan.md"（markdown 文件接力）。
 - 本实现要求 LLM 直接返回 JSON 给 Pydantic 校验（schemas.py），
-  因此重新编写，但吸收原版核心要求：
-  planner → 影响面分析 / test_level / 可执行 verify
-  builder → 严格按计划 / 不评价自己 / 记录 Plan 偏离
-  reviewer → 两阶段审 / 证据驱动 / 不信任 Builder 自信 / 升级标准
+  因此重新编写，但吸收原版核心要求。
 """
 
 MASTER_PROMPT = """你是 Agent Loop 团队的 Master。用户在项目冷启动（尚无项目上下文）时发起了任务。

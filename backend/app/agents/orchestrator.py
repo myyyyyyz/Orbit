@@ -27,8 +27,10 @@ from ..llm import get_llm_config, resolve_api_key, build_chat_request
 from . import db
 from .budget import BudgetExhausted, LoopBudget, LoopPaused, Usage, extract_usage, get_loop_budget
 from .critique import generate_critique
+from .effects import apply_build_files, revert_effects
 from .gate import LoopGate
 from .prompts import MASTER_PROMPT, PLANNER_PROMPT, BUILDER_PROMPT, REVIEWER_PROMPT, USER_AGENT_PROMPT
+from .registry import default_registry
 from .schemas import Plan, BuildOutput, ReviewResult, UxReviewResult, Verdict
 from .state import load_project_state, update_state_after_loop, prune_state, check_graduation_demotion, get_graduation_status, save_project_state
 from .worktree import Worktree, is_git_repo
@@ -578,6 +580,18 @@ def _validate_model(data: dict, model_cls):
         return None, str(e)
 
 
+# ── P3: test_level 分层辅助 ─────────────────────────────────────
+
+_LEVEL_RANK = {"skip": 0, "smoke": 1, "full": 2}
+
+
+def _max_test_level(plan: Plan) -> str:
+    """取计划中所有步骤的最高 test_level（用于分层 gate 校验）。"""
+    if not plan.steps:
+        return "skip"
+    return max((s.test_level.value for s in plan.steps), key=lambda v: _LEVEL_RANK.get(v, 0))
+
+
 # ── Builder 落盘（D4: 直接落盘 + git 快照兜底）──────────────────
 
 def _resolve_safe_project_dir(project_dir: str) -> Optional[str]:
@@ -604,14 +618,15 @@ def _resolve_safe_project_dir(project_dir: str) -> Optional[str]:
 
 
 def _apply_build(build: BuildOutput, project_dir: str) -> dict:
-    """把 Builder 的 changed_files 落盘。返回 {applied, skipped, snapshot_hash}。
+    """把 Builder 的 changed_files 落盘。返回 {applied, skipped, snapshot_hash, effects}。
 
     落盘前执行 git stash create 记录快照（原 builder.md:29-37 设计）。
+    P1: 落盘过程通过 effects 模块记录结构化副作用（含原文），支持精确回滚。
     """
     target = _resolve_safe_project_dir(project_dir)
     if not target:
         return {"applied": False, "skipped": len(build.changed_files), "snapshot_hash": "clean",
-                "reason": "project_dir 为空或越界，未落盘"}
+                "effects": [], "reason": "project_dir 为空或越界，未落盘"}
 
     os.makedirs(target, exist_ok=True)
 
@@ -627,31 +642,14 @@ def _apply_build(build: BuildOutput, project_dir: str) -> dict:
     except (FileNotFoundError, subprocess.SubprocessError) as e:
         logger.warning("git stash create 失败: %s", e)
 
-    applied, skipped = 0, 0
-    for f in build.changed_files:
-        path = f.get("path", "")
-        action = f.get("action", "modify")
-        if not path or ".." in path.split("/") or path.startswith("/"):
-            skipped += 1
-            continue
-        abs_path = os.path.realpath(os.path.join(target, path))
-        if os.path.commonpath([target, abs_path]) != target:
-            skipped += 1
-            continue
-        try:
-            if action == "delete":
-                if os.path.exists(abs_path):
-                    os.remove(abs_path)
-            else:
-                os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-                with open(abs_path, "w", encoding="utf-8") as fp:
-                    fp.write(f.get("content", ""))
-            applied += 1
-        except OSError as e:
-            logger.warning("落盘失败 %s: %s", path, e)
-            skipped += 1
-
-    return {"applied": applied, "skipped": skipped, "snapshot_hash": snapshot}
+    # P1: 结构化落盘 + effect 记录（含路径穿越防护）
+    result = apply_build_files(build.changed_files, target)
+    return {
+        "applied": result["applied"],
+        "skipped": result["skipped"],
+        "snapshot_hash": snapshot,
+        "effects": result["effects"],
+    }
 
 
 # ── Checkpoint ───────────────────────────────────────────────────
@@ -702,6 +700,8 @@ async def run_loop(
     # 尝试从任务/项目目录推断 project_name
     project_name = project_name or _infer_project_name(task_desc, project_dir)
     project_state = load_project_state(user_id, project_name, project_dir)
+    # P1: 最近一次落盘的 effects（异常终止时用于精确回滚）
+    last_effects: list[dict] = []
 
     # P0-2: 清理 STATE 过时数据
     project_state = prune_state(project_state)
@@ -767,6 +767,12 @@ async def run_loop(
 
         # P1-3: 注入用户约束
         context_bits.append(constraints_text)
+
+        # P2: 注入可用技能清单（registry 服务发现，供 Planner 按需选用）
+        try:
+            context_bits.append(f"## 可用技能\n{default_registry().skills_summary()}")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("技能注册表加载失败（跳过注入）: %s", e)
 
         # P6: 文件记忆注入（扫描→小模型选择→预算注入→过期警告）
         try:
@@ -973,14 +979,22 @@ async def run_loop(
                 return
 
         apply_result = _apply_build(build, worktree_path)
+        last_effects = apply_result.get("effects", [])
         # P4: 执行 Builder 的验证命令，产出 Reviewer 证据
         verify_results = _run_verification(build.verification_commands, worktree_path)
+        # P3: 测试分层校验（test_level → 验证充分性证据）
+        verify_gate = gate.check_verification(build.verification_commands, _max_test_level(plan))
         await _emit(loop_id, "builder", "builder_done", {
             "summary": build.summary,
             "changed_files": build.changed_files,
             "plan_deviations": build.plan_deviations,
             "apply": apply_result,
             "verification": verify_results,
+            "verification_gate": {
+                "passed": verify_gate.passed,
+                "warnings": verify_gate.warnings,
+                "test_level": _max_test_level(plan),
+            },
         })
         await _emit_budget()
 
@@ -993,7 +1007,8 @@ async def run_loop(
             review_ctx = (
                 f"## 执行计划\n{json.dumps(plan.model_dump(), ensure_ascii=False, indent=2)}\n\n"
                 f"## Builder 输出\n{json.dumps(build.model_dump(), ensure_ascii=False, indent=2)}\n\n"
-                f"## 实际执行证据（命令输出）\n{json.dumps(verify_results, ensure_ascii=False, indent=2)}"
+                f"## 实际执行证据（命令输出）\n{json.dumps(verify_results, ensure_ascii=False, indent=2)}\n\n"
+                f"## 测试分层校验（P3）\n{json.dumps({'passed': verify_gate.passed, 'warnings': verify_gate.warnings, 'test_level': _max_test_level(plan)}, ensure_ascii=False, indent=2)}"
             )
             raw_review = await _call_agent_llm(REVIEWER_PROMPT, review_ctx, api_key, role_models.get("reviewer") or model,
                                                budget=budget, agent_label="reviewer")
@@ -1075,14 +1090,22 @@ async def run_loop(
                 await _finish(loop_id, "failed")
                 return
             apply_result = _apply_build(build, worktree_path)
+            last_effects = apply_result.get("effects", [])
             # P4: 退回重试后同样执行验证命令
             verify_results = _run_verification(build.verification_commands, worktree_path)
+            # P3: 退回重试后同样做测试分层校验
+            verify_gate = gate.check_verification(build.verification_commands, _max_test_level(plan))
             await _emit(loop_id, "builder", "builder_done", {
                 "summary": build.summary,
                 "changed_files": build.changed_files,
                 "plan_deviations": build.plan_deviations,
                 "apply": apply_result,
                 "verification": verify_results,
+                "verification_gate": {
+                    "passed": verify_gate.passed,
+                    "warnings": verify_gate.warnings,
+                    "test_level": _max_test_level(plan),
+                },
             })
 
         # ── P4: User Agent UX 审查（Reviewer ALL_PASS 后触发）──
@@ -1283,6 +1306,14 @@ async def run_loop(
         logger.exception("Loop %s 执行异常", loop_id)
         if wt:
             wt.discard()
+        elif last_effects:
+            # P1: 非 worktree（直接落盘）场景 → 精确回滚已应用的副作用
+            try:
+                rv = revert_effects(last_effects, worktree_path)
+                logger.info("Loop %s 已回滚 %d 个副作用 (failed=%d)",
+                            loop_id, rv["reverted"], len(rv["failed"]))
+            except Exception as re:  # noqa: BLE001
+                logger.warning("Loop %s effects 回滚失败: %s", loop_id, re)
         await _emit(loop_id, "system", "error", {"message": str(e)}, notify=True)
         db.update_run_log(run_log_id,
             finished_at=datetime.now().isoformat(),

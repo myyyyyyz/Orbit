@@ -51,3 +51,46 @@ def test_logos_with_llm_mock(client, mock_llm, monkeypatch):
     today = datetime.now().strftime("%Y-%m-%d")
     content = open(os.path.join(_memory_dir(), f"{today}.md"), encoding="utf-8").read()
     assert "这是 Mock LLM 的回答" in content
+
+
+def test_extract_key_points():
+    """key_points 解析：正常 / 无标记 / 坏 JSON / 超长截断"""
+    from app.api.logos import _extract_key_points, KEY_POINTS_MAX
+
+    # 正常解析（忽略 Markdown 部分，只取 KEY_POINTS 行）
+    text = "## 总结\n做了什么\n\nKEY_POINTS: [\"要点1\", \"要点2\", \"要点3\"]"
+    assert _extract_key_points(text) == ["要点1", "要点2", "要点3"]
+
+    # 无标记 → 空列表
+    assert _extract_key_points("没有要点的总结") == []
+
+    # 坏 JSON → 空列表（容错，不影响主功能）
+    assert _extract_key_points("KEY_POINTS: [\"未闭合") == []
+
+    # 空输入 → 空列表
+    assert _extract_key_points("") == []
+
+    # 超长列表截断
+    long_text = 'KEY_POINTS: [' + ", ".join(f'"p{i}"' for i in range(30)) + "]"
+    assert len(_extract_key_points(long_text)) == KEY_POINTS_MAX
+
+
+def test_logos_saves_summary_with_auth(client, auth_headers, auth_token):
+    """带认证调用 logos → 无 LLM 降级路径也落库 conversation_summary（key_points 为空）"""
+    r = client.post(
+        "/api/v1/knowledge/logos",
+        json={"conversation": "用户：搭建知识库\n助手：已完成 RAG 流程"},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["saved_to_memory_db"] is True
+    assert data["key_points"] == []  # 无 LLM 分支 → 无 KEY_POINTS → 空列表
+
+    from app.memory import get_recent_summaries
+    from app.middleware.auth import verify_access_token
+    user_id = verify_access_token(auth_token)["user_id"]
+    recent = get_recent_summaries(user_id, limit=1)
+    assert len(recent) == 1
+    assert "对话总结" in recent[0]["summary"]
+    assert recent[0]["key_points"] == []

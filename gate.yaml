@@ -85,3 +85,41 @@ auto_merge_allowlist:
     - change_type_is: ["typo", "lint_fix", "import_sort", "comment_fix", "doc_update"]
     - not_in_denylist: true
     - all_tests_pass: true
+
+# ── 测试分层（P3）：test_level 决定 Builder 验证命令的最低深度要求 ──
+# require_verification: 是否必须提供至少 1 条验证命令
+# require_test: 是否必须提供至少 1 条测试命令（pytest/go test/npm test 等）
+# allowed_prefixes: 该档位允许的验证命令前缀（超出视为 warning，不阻止执行）
+# 说明: 分层是"充分性要求"，不替代 allowed_commands 白名单（安全拦截）。
+test_levels:
+  skip:
+    require_verification: false
+    require_test: false
+    allowed_prefixes: []            # ≤10 行/纯转换/常量文案，免测
+  smoke:
+    require_verification: true      # 至少 1 条验证命令
+    require_test: false
+    allowed_prefixes:
+      - "python3 -m pytest"
+      - "python -m pytest"
+      - "pytest"
+      - "npm run lint"
+      - "npm run test"
+      - "eslint"
+      - "mypy"
+      - "ruff check"
+      - "black --check"
+      - "prettier --check"
+      - "node -e"
+  full:
+    require_verification: true
+    require_test: true              # 核心路径/状态变更/多分支：强制测试
+    allowed_prefixes:
+      - "python3 -m pytest"
+      - "python -m pytest"
+      - "pytest"
+      - "npm test"
+      - "npm run test"
+      - "go test"
+      - "cargo test"
+      - "make test"

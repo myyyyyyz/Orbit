@@ -94,6 +94,38 @@ auto_merge_allowlist:
     - change_type_is: ["typo", "lint_fix", "import_sort", "comment_fix", "doc_update"]
     - not_in_denylist: true
     - all_tests_pass: true
+
+test_levels:
+  skip:
+    require_verification: false
+    require_test: false
+    allowed_prefixes: []
+  smoke:
+    require_verification: true
+    require_test: false
+    allowed_prefixes:
+      - "python3 -m pytest"
+      - "python -m pytest"
+      - "pytest"
+      - "npm run lint"
+      - "npm run test"
+      - "eslint"
+      - "mypy"
+      - "ruff check"
+      - "black --check"
+      - "prettier --check"
+  full:
+    require_verification: true
+    require_test: true
+    allowed_prefixes:
+      - "python3 -m pytest"
+      - "python -m pytest"
+      - "pytest"
+      - "npm test"
+      - "npm run test"
+      - "go test"
+      - "cargo test"
+      - "make test"
 """
 
 
@@ -145,6 +177,7 @@ class LoopGate:
         self.allowed_commands = config.get("allowed_commands", [])
         self.enforcement = config.get("enforcement", "reject")
         self.on_hit = config.get("on_hit", {})
+        self.test_levels = config.get("test_levels", {}) or {}
         self._loaded = True
 
     def check_path(self, file_path: str) -> GateResult:
@@ -207,6 +240,54 @@ class LoopGate:
             if cmd.startswith(allowed):
                 return True
         return False
+
+    # ── P3: 测试分层校验 ──────────────────────────────────────────
+
+    _TEST_CMD_PREFIXES = (
+        "pytest", "go test", "cargo test", "npm test", "npm run test",
+        "make test", "python3 -m pytest", "python -m pytest",
+    )
+
+    def check_verification(self, commands: list[str], test_level: str) -> GateResult:
+        """按 test_level 校验 Builder 验证命令的充分性（不阻止执行，只产出证据）。
+
+        test_level 定义（gate.yaml test_levels）:
+        - skip:  免测，不要求验证命令
+        - smoke: 至少 1 条验证命令（lint/单测均可）
+        - full:  至少 1 条测试命令（pytest/go test/npm test 等）
+
+        返回 GateResult：
+        - passed=False 表示验证深度不足（供 Reviewer 作为证据，不 abort）
+        - warnings 携带具体缺失原因
+        """
+        self.load()
+        if not commands:
+            commands = []
+
+        level_cfg = self.test_levels.get(test_level, {}) if test_level else {}
+        require_verification = level_cfg.get("require_verification", test_level in ("smoke", "full"))
+        require_test = level_cfg.get("require_test", test_level == "full")
+        allowed_prefixes = level_cfg.get("allowed_prefixes", []) or []
+
+        warnings: list[str] = []
+        has_any = len(commands) > 0
+        has_test = any(
+            c.strip().startswith(p) for c in commands for p in self._TEST_CMD_PREFIXES
+        )
+
+        if require_verification and not has_any:
+            warnings.append(f"test_level={test_level} 要求至少 1 条验证命令，但 Builder 未提供")
+        if require_test and not has_test:
+            warnings.append(f"test_level={test_level} 要求测试命令（{'/'.join(self._TEST_CMD_PREFIXES)}），但 Builder 未提供")
+        if allowed_prefixes and commands:
+            for c in commands:
+                if not any(c.strip().startswith(p) for p in allowed_prefixes):
+                    warnings.append(
+                        f"验证命令 '{c.strip()}' 超出 test_level={test_level} 允许范围 "
+                        f"(allowed: {' | '.join(allowed_prefixes[:5])}...)"
+                    )
+
+        return GateResult(passed=len(warnings) == 0, hits=[], warnings=warnings, abort=False)
 
 
 def load_gate(project_dir: str) -> LoopGate:
