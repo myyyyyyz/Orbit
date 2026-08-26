@@ -1,8 +1,15 @@
 <div align="center">
 
+<br/>
+
 # 星轨 Orbit
 
-### AI Agent 端到端系统 — 让 AI 自主完成从需求到交付的全流程
+**AI Agent 端到端系统 — 让 AI 自主完成从需求到交付的全流程**
+
+[![Tests](https://img.shields.io/badge/tests-407%20passed-22c55e)]()
+[![Frontend](https://img.shields.io/badge/frontend-36%20passed-22c55e)]()
+[![Python](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12-3b82f6)]()
+[![License](https://img.shields.io/badge/license-MIT-8195ad)]()
 
 </div>
 
@@ -10,89 +17,82 @@
 
 ## 项目简介
 
-**星轨（Orbit）** 是一套面向中小微企业和个人用户的 AI Agent 端到端系统，让用户只需描述"想做什么"，AI 即可自主完成 **需求对齐 → 规划 → 编码 → 审查 → 交付** 的全流程闭环。
+**星轨（Orbit）** 是一套面向中小微企业与个人的 AI Agent 端到端系统。用户只需描述"想做什么"，AI 即可自主完成 **需求对齐 → 规划 → 编码 → 审查 → 交付** 的全流程闭环。
 
-## Knowledge Agent（实验性）
+四大核心引擎：
 
-Knowledge Agent 面向企业文件夹中的多格式知识资产，把传统的“上传后统一切片”升级为可审计的策略规划流程：
+| 引擎 | 能力 |
+|------|------|
+| **Agent Loop** | Master → Planner → Builder → Reviewer → User Agent 五角色状态机，生成-评估分离 |
+| **RAG 知识引擎** | Knowledge Agent 驱动的"策略规划→执行→评测→发布"可审计闭环 |
+| **智能调度** | 三级级联意图路由、语义缓存、混合存储路由、安全分类器 |
+| **工程化体系** | 测试 / 认证 / 可靠性 / 交付 / 可观测性五大支柱 |
 
-```text
-Markdown / Word / Excel / PDF
-        ↓
-确定性文件画像 + 有界内容证据
-        ↓
-Knowledge Agent 推荐 RAG 策略
-        ↓
-策略目录校验 + 规则兜底
-        ↓
-FolderPlan → KnowledgeRun → 人工审批
-        ↓
-多格式 Executor → 确定性 KnowledgeChunk
-        ↓
-按租户与 run_id 隔离的 staging collection
-        ↓
-版本化离线检索评测与确定性质量门禁
-        ↓
-原子发布活动索引 → Search / Ask → 可回滚上一版本
+---
+
+## 快速开始
+
+### 方式一：Docker（推荐）
+
+```bash
+# 1. 配置环境变量
+cp .env.example .env
+# 编辑 .env，至少填入：
+#   LLM_API_KEY  — 你的模型 API Key
+#   SECRET_KEY   — python3 -c "import secrets; print(secrets.token_hex(32))"
+
+# 2. 一键启动
+docker compose up -d --build
+
+# 3. 访问
+# 前端 http://localhost:3000
+# API 文档 http://localhost:8001/docs
 ```
 
-当前已完成：
+数据持久化在 `orbit_data` 卷中（向量库、SQLite、上传文件、用量日志）。
 
-- 七份真实多格式测试文档，覆盖结构整齐、格式混乱、表格、图片、文本 PDF 和扫描 PDF。
-- Markdown、DOCX、XLSX、文本 PDF、扫描 PDF 的确定性文件画像。
-- OpenAI-compatible Knowledge Agent Adapter；缺少密钥、超时或非法结果时按文件规则兜底。
-- Agent 输出只能选择现有策略目录中的策略，强制复核要求不能被 Agent 取消。
-- `KnowledgeRun` 状态机、租户隔离、原子审批和 SQLite 审计记录。
-- 审批时重新比较完整文件清单与内容哈希；新增、删除、重命名或修改文件都会使计划失效。
-- Markdown、DOCX、XLSX、文本 PDF 与扫描 PDF 策略 Executor；扫描 PDF 通过可注入 OCR Adapter 执行，未配置 OCR 时明确阻塞。
-- Chunk ID 由运行、源文件哈希、策略和源定位确定性生成，同一运行重试不会重复创建向量。
-- 批准后的运行只写入按租户与 `run_id` 隔离的 ChromaDB staging collection；任一文档失败都会删除整个 staging 并把审计写入数归零。
-- 版本化评测集计算来源 Hit@5、Locator Hit@5、MRR 与 nDCG；关键问题未命中或指标未达标时禁止发布。
-- 评测报告只持久化指标、Chunk ID 与来源定位，不把 Chunk 原文或 Embedding 写入 SQLite。
-- 通过门禁的运行可原子切换租户活动索引指针；Search、Ask 与语义缓存跟随活动版本，并可回滚到仍完整存在的直接上一版本。
-- Knowledge Workbench 七步界面已贯通服务器目录与本地文件夹，支持刷新恢复、策略审阅、审批、评测、发布和回滚。
-- 本地文件夹以租户隔离的不可变 `ImportBatch` 导入；逐文件校验相对路径、格式、大小和 SHA-256，冻结后复用同一条 KnowledgeRun 流水线。
+### 方式二：本地开发
 
-> **当前边界：** 3.4 Knowledge Workbench 主流程已完成。正式入库支持 `.md`、`.docx`、`.xlsx` 和 `.pdf`；旧单文件上传仍保留为 legacy 兼容入口，不参与 Knowledge Agent 的正式发布流程。
+```bash
+# 后端
+cd backend
+pip install -r requirements.txt
+export LLM_API_KEY=sk-xxx
+export SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+python3 -m uvicorn app.main:app --port 8001 --reload
 
-### Knowledge Workbench 使用方式
-
-1. 登录后从左侧进入“知识库”，默认打开 `RAG Workbench`。
-2. 选择服务器 `knowledge/` 相对目录，或选择本地文件夹。
-3. 本地导入仅允许 PDF、Word、Excel 和 Markdown；单文件上限 25 MiB，单批次上限 250 MiB / 500 个文件。
-4. 冻结成功后生成 dry-run，审阅 Agent 建议、规则兜底和强制复核文件。
-5. 显式审批后执行隔离索引，运行离线评测；只有评测通过才能发布。
-6. 发布后 Search / Ask 原子切换到新版本，必要时可回滚到直接上一版本。
-
-页面只在 `localStorage` 保存最近的 Run ID，不保存文件内容、评测报告或向量。刷新后会按当前租户恢复 Run、评测和活动版本。
-
-测试资产位于：
-
-```text
-knowledge/
-├── fixtures/                  # DOCX、XLSX、PDF、Markdown 多格式测试集
-└── evals/
-    ├── expected-strategies.jsonl
-    └── questions.jsonl
+# 前端（另开终端）
+cd frontend
+npm install
+npm run dev
 ```
 
-### 架构总览
+> 服务启动时会强制校验 `LLM_API_KEY`、`SECRET_KEY`、`CORS_ORIGINS`，缺失或不安全时**拒绝启动**而非静默降级。
+
+### 配置模型
+
+打开 `http://localhost:3000` → 左侧 **设置** → 展开模型卡片 → 填入 API Key 与模型名。
+
+API Key 仅存于浏览器 `localStorage`，前端通过 `X-API-Key` 请求头传给后端，后端据此调用 LLM，**不落库**。
+
+---
+
+## 架构总览
 
 ```
-┌─────────────────────────────────────────────────────┐
-│              Next.js Frontend (port 3000)            │
-│   Chat UI  │ 知识库面板 │ Agent 观察台 │ 设置/策略    │
-├─────────────────────────────────────────────────────┤
-│               FastAPI Backend (port 8001)            │
-│   RAG 检索  │  LLM 生成  │  SSE 流式  │  多租户     │
-├─────────────────────────────────────────────────────┤
-│                   数据层                             │
-│   ChromaDB (向量)  │  SQLite  │  文件存储           │
-├─────────────────────────────────────────────────────┤
-│                 Agent Loop                           │
-│   Master → Planner → Builder → Reviewer → User      │
-│   (文件通信协议 + 迭代熔断 + 分支安全)               │
-└─────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│              Next.js 16 Frontend (:3000)                 │
+│   对话 │ 知识工作台 │ 语义搜索 │ 策略配置 │ 设置        │
+├─────────────────────────────────────────────────────────┤
+│               FastAPI Backend (:8001)                    │
+│   RAG 检索 │ LLM 生成 │ SSE 流式 │ 多租户 │ Agent Loop  │
+├─────────────────────────────────────────────────────────┤
+│                      数据层                              │
+│   ChromaDB (HNSW 向量) │ SQLite (Alembic 迁移) │ 文件   │
+├─────────────────────────────────────────────────────────┤
+│                    可观测性                              │
+│   structlog │ X-Request-ID │ Prometheus │ Sentry        │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -101,181 +101,216 @@ knowledge/
 
 ```
 Orbit/
-├── frontend/                  # Web UI (Next.js 16 + Tailwind v4)
-│   ├── src/app/               # 路由 + 全局样式
-│   ├── src/lib/               # API 封装 + 工具函数
-│   └── src/components/        # UI 组件
-│       ├── chat/              # 流式对话、Markdown、引用悬浮
-│       ├── sidebar/           # 响应式侧边栏
-│       ├── knowledge-base/    # 文档上传、列表管理
-│       ├── search/            # 语义搜索面板
-│       ├── agent/             # Agent 观察台
-│       ├── strategy/          # RAG 策略配置
-│       ├── settings/          # API Key + 多模型管理
-│       ├── onboarding/        # 新手引导
-│       └── auth/              # 登录/注册
+├── backend/                   # FastAPI 后端
+│   ├── app/
+│   │   ├── main.py            # 应用入口（lifespan / 中间件 / 路由注册）
+│   │   ├── config.py          # RAG 四大策略 + 启动时配置校验
+│   │   ├── logging_config.py  # structlog 结构化日志
+│   │   ├── chunk/             # 文本切割（语义段落 + 长句重叠）
+│   │   ├── embed/             # 向量化（sentence-transformers / Ollama / OpenAI）
+│   │   ├── store/             # ChromaDB（多租户 Collection 隔离）
+│   │   ├── search/            # 语义检索（Active Index 版本解析）
+│   │   ├── cache/             # 语义缓存（Faiss 加速 + 自适应阈值）
+│   │   ├── router/            # 模型路由（规则→语义→LLM 三层级联）
+│   │   ├── generate/          # 非流式 RAG 生成
+│   │   ├── stream/            # SSE 流式（7 阶段事件）
+│   │   ├── knowledge_agent/   # 策略规划 → 执行 → 评测 → 发布
+│   │   ├── agents/            # Agent Loop 编排 + 安全门控 + effects
+│   │   ├── memory/            # 六层记忆金字塔
+│   │   ├── multitenant/       # bcrypt + JWT + 租户隔离
+│   │   ├── middleware/        # 认证 / request-id / 全局异常
+│   │   ├── monitoring/        # Prometheus + Sentry（可选依赖）
+│   │   └── llm/               # 客户端 + 重试 + 熔断 + Fallback
+│   ├── alembic/               # 数据库迁移版本
+│   ├── test/                  # 59 文件 / 407 用例
+│   └── Dockerfile
 │
-├── backend/                   # 知识库后端 (FastAPI)
-│   └── app/
-│       ├── main.py            # 30+ API 端点
-│       ├── generate/          # LLM 生成 (自动匹配模型 API 地址)
-│       ├── stream/            # SSE 流式输出 (7 阶段事件)
-│       ├── search/            # 语义检索 (向量 + BM25 + 混合)
-│       ├── embed/             # 双后端 Embedding
-│       ├── chunk/             # 语义切割 (中文适配)
-│       ├── ingest/            # 文件解析 (PDF/MD/TXT)
-│       ├── store/             # ChromaDB 存储
-│       ├── knowledge_agent/   # 文件画像、策略规划、审批与审计
-│       ├── router/            # 模型路由 (fast/balanced/strong)
-│       ├── cache/             # 语义缓存 (736x 加速)
-│       ├── multitenant/       # 多租户隔离
-│       ├── middleware/        # JWT 鉴权 + X-Request-ID
-│       └── schemas/           # Pydantic 模型
+├── frontend/                  # Next.js 16 + Tailwind v4
+│   ├── src/app/               # 路由 + 设计系统（globals.css）
+│   ├── src/components/        # 对话 / 知识工作台 / 侧边栏 / 设置 …
+│   ├── src/lib/               # API 客户端（统一 /api/v1 前缀）
+│   ├── test/ + src/**/*.test  # 36 用例
+│   └── Dockerfile             # 多阶段构建（standalone）
 │
-├── agent-loop/                # Agent 编排框架
-│   ├── agents/                # 6 个 Agent 角色定义
-│   ├── memory/                # Agent 运行时状态
-│   ├── scenes/                # 场景定义
-│   ├── skills/                # 12 个集成 Skill
-│   └── run-loop.sh            # CLI Runner
-│
-├── knowledge/                 # Knowledge Agent 测试资产与评测标签
-│   ├── fixtures/              # 多格式真实文档
-│   └── evals/                 # 期望策略与检索问题
-│
-├── data/                      # 运行时数据 (gitignore)
-│   ├── chroma_db/             # ChromaDB 向量存储
-│   ├── uploads/               # 上传文档
-│   ├── logs/                  # 后端日志
-│   ├── memory/                # Logos 对话总结
-│   └── screenshots/           # 浏览器截图
-│
-└── docs/                      # 项目文档
-    └── FRONTEND-PRD.md        # 前端需求规格
-```
-
----
-
-## 快速开始
-
-### 1. 启动后端
-
-```bash
-cd backend
-pip install -r requirements.txt
-python3 -m uvicorn app.main:app --port 8001 --host 0.0.0.0
-```
-
-### 2. 启动前端
-
-```bash
-cd frontend
-npm install
-npm run dev -- -p 3000
-```
-
-### 3. 配置 API Key
-
-打开 `http://localhost:3000` → 完成新手引导 → 左侧 **设置** → 展开模型卡片 → 填入 API Key 和模型名。
-
-> API Key 仅保存在浏览器本地，前端通过 `X-API-Key` 请求头传递给后端，后端据此调用 LLM。
-
-Knowledge Agent 的文件夹规划由后端发起，复用以下 OpenAI-compatible 环境变量：
-
-| 环境变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `LLM_API_KEY` | 空 | Knowledge Agent 的 Bearer 凭据；为空时自动使用规则兜底 |
-| `LLM_BASE_URL` | `https://api.openai.com/v1/chat/completions` | OpenAI-compatible Chat Completions 地址 |
-| `LLM_MODEL` | `gpt-4o-mini` | Knowledge Agent 规划模型 |
-| `KNOWLEDGE_AGENT_TIMEOUT_SECONDS` | `20` | 单份文件的 Agent 调用超时秒数 |
-
-### 4. 上传文档并对话
-
-- 左侧 **知识库** → 拖拽上传 PDF/MD/TXT
-- 左侧 **对话** → 输入问题，AI 基于知识库检索 + LLM 生成回答
-- 回复中的文件名可 hover 查看原文引用片段
-
----
-
-## 前后端交互
-
-```
-用户在设置面板输入 API Key
-        ↓
-localStorage 保存
-        ↓
-前端 api.ts 注入请求头:
-  X-API-Key:  sk-xxx
-  X-LLM-Model: deepseek-chat
-        ↓
-后端 main.py 读取请求头 → 传给 generate/stream 模块
-        ↓
-根据模型名自动匹配 API 地址:
-  deepseek → api.deepseek.com
-  claude   → api.anthropic.com
-  其他      → api.openai.com
-        ↓
-LLM 生成 → SSE 流式返回 → 前端渲染
+├── agent-loop/                # Agent 角色定义 / 场景 / 技能 / 运行时记忆
+├── knowledge/                 # 多格式测试资产 + 评测标签
+├── docs/                      # 工程化与 RAG 专题文档
+├── docker-compose.yml         # 一键编排
+├── gate.yaml                  # Agent 安全门控（黑名单 / 命令白名单）
+├── loop-constraints.md        # Loop 行为约束（预算 / 时间 / 碰撞 / 升级）
+└── .env.example               # 环境变量模板
 ```
 
 ---
 
 ## API 端点
 
-| 端点 | 方法 | 功能 |
+全部业务接口统一 `/api/v1` 前缀；`/health` 与 `/metrics` 不带版本号。
+
+### 基础
+
+| 端点 | 方法 | 说明 |
 |------|------|------|
-| `/health` | GET | 深度健康检查 |
-| `/api/knowledge/upload` | POST | 上传文件并索引 |
-| `/api/knowledge/search` | GET | 语义搜索 |
-| `/api/knowledge/ask` | POST | RAG 问答 |
-| `/api/knowledge/ask/stream` | GET | SSE 流式问答 |
-| `/api/knowledge/plan-folder` | POST | 生成文件夹 RAG 策略 dry-run，不写向量库 |
-| `/api/knowledge/imports` | POST | 创建当前租户的本地文件夹导入批次 |
-| `/api/knowledge/imports/{import_id}/files` | POST | 上传一个带受控相对路径的文件 |
-| `/api/knowledge/imports/{import_id}/complete` | POST | 校验并冻结批次，返回可规划的 `relative_path` |
-| `/api/knowledge/imports/{import_id}` | GET/DELETE | 查询批次，或删除尚未冻结的批次 |
-| `/api/knowledge/runs` | GET | 分页查询当前租户最近的 KnowledgeRun |
-| `/api/knowledge/runs/{run_id}` | GET | 查询当前用户的 KnowledgeRun 状态 |
-| `/api/knowledge/runs/{run_id}/approve` | POST | 校验源文件未变化后批准计划，此步骤不写向量库 |
-| `/api/knowledge/runs/{run_id}/execute` | POST | 执行批准计划并写入隔离 staging，等待离线评测 |
-| `/api/knowledge/runs/{run_id}/evaluate` | POST | 对 staging 运行版本化离线检索评测 |
-| `/api/knowledge/runs/{run_id}/evaluation` | GET | 查询不含 Chunk 原文的评测报告 |
-| `/api/knowledge/runs/{run_id}/promote` | POST | 门禁通过后原子发布活动索引版本 |
-| `/api/knowledge/active-version` | GET | 查询当前租户活动或 legacy 索引版本 |
-| `/api/knowledge/runs/{run_id}/rollback` | POST | 回滚当前版本到仍存在的直接上一版本 |
-| `/api/knowledge/strategy` | GET/PATCH | RAG 策略管理 |
-| `/api/knowledge/logos` | POST | 对话总结 |
-| `/api/auth/register` | POST | 注册 (限流) |
-| `/api/auth/login` | POST | 登录 (限流) |
+| `/health` | GET | 深度健康检查（ChromaDB / SQLite / LLM Key） |
+| `/metrics` | GET | Prometheus 指标（需 `ENABLE_PROMETHEUS=1`） |
+| `/api/v1/auth/register` | POST | 注册（5 次/分钟限流） |
+| `/api/v1/auth/login` | POST | 登录（5 次/分钟限流） |
+| `/api/v1/auth/me` | GET | 当前用户信息 |
+
+### 知识库
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/v1/knowledge/upload` | POST | 上传并索引（legacy 单文件入口） |
+| `/api/v1/knowledge/search` | GET | 语义搜索 |
+| `/api/v1/knowledge/source` | DELETE | 按来源删除该文档全部 chunk |
+| `/api/v1/knowledge/ask` | POST | RAG 问答 |
+| `/api/v1/knowledge/ask/stream` | GET | SSE 流式问答 |
+| `/api/v1/knowledge/strategy` | GET/PATCH | RAG 策略管理 |
+| `/api/v1/knowledge/usage` | GET | Token 用量与成本估算 |
+| `/api/v1/knowledge/cache/stats` | GET | 语义缓存命中率 |
+
+### Knowledge Agent 治理流程
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/v1/knowledge/plan-folder` | POST | 生成策略 dry-run（不写向量库） |
+| `/api/v1/knowledge/imports` | POST | 创建本地文件夹导入批次 |
+| `/api/v1/knowledge/imports/{id}/files` | POST | 上传单个受控相对路径文件 |
+| `/api/v1/knowledge/imports/{id}/complete` | POST | 校验并冻结批次 |
+| `/api/v1/knowledge/runs` | GET | 分页查询本租户 KnowledgeRun |
+| `/api/v1/knowledge/runs/{id}/approve` | POST | 校验源文件未变更后批准 |
+| `/api/v1/knowledge/runs/{id}/execute` | POST | 执行并写入隔离 staging |
+| `/api/v1/knowledge/runs/{id}/evaluate` | POST | 离线检索评测 |
+| `/api/v1/knowledge/runs/{id}/promote` | POST | 门禁通过后原子发布 |
+| `/api/v1/knowledge/runs/{id}/rollback` | POST | 回滚到上一版本 |
+| `/api/v1/knowledge/active-version` | GET | 查询当前活动索引版本 |
+
+### Agent Loop
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/v1/agents/loop` | POST | 启动 Loop |
+| `/api/v1/agents/loop/pause-all` | GET/POST | 全局暂停开关（kill switch） |
+| `/api/v1/agents/loop/{id}` | GET | Loop 详情 + 事件流 |
+| `/api/v1/agents/loop/{id}/events` | GET | SSE 实时事件 |
+| `/api/v1/agents/loop/{id}/decision` | POST | Checkpoint 决策 |
+| `/api/v1/agents/schedules` | GET/POST | 定时调度管理 |
+
+完整交互式文档：启动后访问 `http://localhost:8001/docs`。
 
 ---
 
-## 前端功能模块
+## Knowledge Agent 工作流
 
-| 模块 | 功能 |
-|------|------|
-| **对话** | SSE 流式、Markdown、建议问题、复制/反馈 |
-| **知识库** | 拖拽上传、文档列表、本地搜索 |
-| **搜索** | 后端语义搜索、相似度百分比 |
-| **Agent 观察台** | 状态摘要 + 可展开时间线 + 预览 |
-| **策略配置** | Chunk/Overlap/Top-K 滑块 + 模型 + 检索模式 + Rerank |
-| **设置** | API Key 保存/显示 + 多模型管理 (点击展开) + 健康状态 |
-| **新手引导** | 首次弹出 → 角色选择 → 推荐 Skill |
-| **侧边栏** | 响应式 + 历史对话删除 |
+把"上传后统一切片"升级为可审计的策略治理流程：
+
+```
+Markdown / Word / Excel / PDF
+        ↓  确定性文件画像 + 有界内容证据
+Knowledge Agent 推荐 RAG 策略
+        ↓  策略目录校验 + 规则兜底（AI 失败不阻塞）
+FolderPlan → KnowledgeRun → 人工审批（SHA-256 重校验）
+        ↓  多格式 Executor → 确定性 KnowledgeChunk
+按租户与 run_id 隔离的 staging collection
+        ↓  Source Hit@5 / MRR / nDCG 离线评测门禁
+SQLite 事务原子发布活动索引 → Search / Ask 零改动生效
+        ↓  效果不佳可一键回滚上一版本
+```
+
+**已支持**：`.md` / `.docx` / `.xlsx` / `.pdf`（含扫描件 OCR 路径，需配置 OCR Adapter）。
+
+### 使用方式
+
+1. 登录后进入 **知识库** → 默认打开 `RAG Workbench`
+2. 选择服务器 `knowledge/` 相对目录，或上传本地文件夹
+3. 本地导入限制：单文件 ≤ 25 MiB，单批次 ≤ 250 MiB / 500 文件
+4. 冻结后生成 dry-run，审阅 Agent 建议、规则兜底与强制复核项
+5. 显式审批 → 执行隔离索引 → 离线评测（通过才可发布）
+6. 发布后 Search / Ask 原子切换；必要时回滚
+
+页面仅在 `localStorage` 保存最近 Run ID，不保存文件内容、评测报告或向量。
 
 ---
 
 ## Agent Loop
 
-五 Agent 通过 markdown 文件通信，跨 session 持久化：
+五角色通过结构化 JSON 通信，跨 session 持久化：
 
 | Agent | 职责 | 权限 |
 |-------|------|------|
 | **Master** | 需求对齐，大白话 → 结构化 Spec | 一次性 |
-| **Planner** | 产出执行计划 + 影响面分析 | 只读 |
-| **Builder** | 按计划执行代码修改 | 可读写 |
-| **Reviewer** | 两阶段审查 (Spec + Quality) | 只读 |
-| **User Agent** | UX 截图审查 (前端/全栈场景) | 只读 |
+| **Planner** | 执行计划 + 影响面分析 | 只读 |
+| **Builder** | 按计划落盘代码 | 可读写 |
+| **Reviewer** | 两阶段审查（Spec + Quality） | 只读 |
+| **User Agent** | UX 截图审查（前端场景） | 只读 |
+
+**五层安全护栏**：约束注入 → Gate denylist 机械拦截 → git worktree 隔离 → 命令白名单与 Shell 注入防护 → 迭代熔断与分支锁并发控制。
+
+**六层记忆金字塔**：L0 文件记忆 → L1 会话内存 → L2 事件溯源 → L3 对话摘要 → L4 持久画像 → L5 STATE 脊柱。
+
+---
+
+## 工程化体系
+
+| 支柱 | 实现 |
+|------|------|
+| **测试** | 407 后端 + 36 前端用例；conftest 临时目录隔离、Mock LLM 按角色路由 |
+| **认证** | bcrypt(rounds=12) + JWT(HS256) + 参数化查询；可选/强制双模认证 |
+| **可靠性** | tenacity 指数退避 + pybreaker 熔断 + Fallback 模型三级联动 |
+| **交付** | Alembic 迁移 + Docker 多阶段构建 + GitHub Actions 三版本矩阵 CI |
+| **可观测性** | structlog JSON 日志 + X-Request-ID 全链路 + Prometheus + Sentry |
+
+详见 [`docs/engineering/`](docs/engineering/) 与 [`docs/rag/`](docs/rag/)。
+
+---
+
+## 环境变量
+
+完整列表见 [`.env.example`](.env.example)。关键项：
+
+| 变量 | 必填 | 说明 |
+|------|:----:|------|
+| `LLM_API_KEY` | ✅ | 模型 API Key，缺失则拒绝启动 |
+| `SECRET_KEY` | ✅ | JWT 签名密钥（≥ 32 字符） |
+| `CORS_ORIGINS` | ✅ | 允许的前端来源，不可用 `*` |
+| `LLM_BASE_URL` | | OpenAI 兼容端点，默认 DeepSeek |
+| `LLM_FALLBACK_MODEL` | | 主模型不可用时的备用模型 |
+| `DATA_DIR` | | 数据根目录，Docker 内为 `/app/data` |
+| `KNOWLEDGE_ROOT` | | 知识源根目录，Agent 只能在此范围规划 |
+| `ENABLE_PROMETHEUS` | | 设为 `1` 开启 `/metrics` |
+| `SENTRY_DSN` | | 配置后自动上报未处理异常 |
+
+---
+
+## 开发调试
+
+```bash
+# 后端测试
+cd backend && python3 -m pytest test/ -q
+
+# 前端测试 / 构建
+cd frontend && npm test && npm run build
+
+# RAG 问答
+curl -X POST http://localhost:8001/api/v1/knowledge/ask \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: sk-xxx" \
+  -H "X-LLM-Model: deepseek-chat" \
+  -d '{"question": "hello"}'
+
+# SSE 流式
+curl -N "http://localhost:8001/api/v1/knowledge/ask/stream?q=hello" \
+  -H "X-API-Key: sk-xxx"
+
+# 离线生成策略计划（显式禁用 Agent，始终不写向量库）
+curl -X POST http://localhost:8001/api/v1/knowledge/plan-folder \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"path":"fixtures","use_agent":false}'
+```
+
+审批前服务会重新扫描完整文件清单并比较 SHA-256；文件新增、删除、重命名或内容变化都会将运行标记为 `invalidated`，需重新规划。执行成功响应中的 `staging_collection` / `chunk_count` / `vector_store_writes` 仅用于审计，**不代表已发布**——只有评测通过并显式 `promote` 后 Search / Ask 才会使用该版本。
 
 ---
 
@@ -283,75 +318,16 @@ LLM 生成 → SSE 流式返回 → 前端渲染
 
 | 层 | 技术 |
 |---|------|
-| 前端框架 | Next.js 16 + TypeScript |
-| 样式 | Tailwind v4 + CSS 变量 |
-| 动画 | Motion |
-| 图标 | Lucide React |
-| Markdown | react-markdown + rehype-sanitize |
-| 后端框架 | FastAPI + Python 3.9+ |
-| 向量数据库 | ChromaDB (HNSW + cosine) |
-| 关系数据库 | SQLite |
-| Embedding | sentence-transformers (MiniLM) |
-| 文件解析 | PyPDF2 |
-| 流式输出 | SSE |
-| Agent 框架 | 自研五 Agent + 文件通信协议 |
+| 前端 | Next.js 16 · TypeScript · Tailwind v4 · Motion · Lucide |
+| 后端 | FastAPI · Python 3.10+ · Pydantic v2 · Uvicorn |
+| 向量库 | ChromaDB（HNSW + cosine） |
+| 关系库 | SQLite + Alembic |
+| Embedding | sentence-transformers / Ollama / OpenAI |
+| 可靠性 | tenacity · pybreaker |
+| 可观测性 | structlog · Prometheus · Sentry |
+| 测试 | pytest · Vitest · Testing Library |
 
 ---
-
-## 开发调试
-
-```bash
-# 测试后端问答
-curl -X POST http://localhost:8001/api/knowledge/ask \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: sk-xxx" \
-  -H "X-LLM-Model: deepseek-chat" \
-  -d '{"question": "hello"}'
-
-# 测试流式 SSE
-curl -N "http://localhost:8001/api/knowledge/ask/stream?q=hello" \
-  -H "X-API-Key: sk-xxx"
-
-# 离线生成知识库策略计划（显式禁用 Agent，始终不写向量库）
-curl -X POST http://localhost:8001/api/knowledge/plan-folder \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"path":"fixtures","use_agent":false}'
-```
-
-规划响应中的 `status` 为 `planned` 或 `review_required`。批准前服务会重新扫描完整文件清单并比较内容哈希；文件新增、删除、重命名或内容变化都会将运行标记为 `invalidated`，需要重新生成计划。
-
-```bash
-# 查询运行状态
-curl http://localhost:8001/api/knowledge/runs/<run_id> \
-  -H "Authorization: Bearer <token>"
-
-# 批准未变化的计划；审批动作本身仍保持零向量写入
-curl -X POST http://localhost:8001/api/knowledge/runs/<run_id>/approve \
-  -H "Authorization: Bearer <token>"
-
-# 执行已批准计划；仅写入隔离 staging，成功状态为 evaluating
-curl -X POST http://localhost:8001/api/knowledge/runs/<run_id>/execute \
-  -H "Authorization: Bearer <token>"
-
-# 评测隔离索引；未达门禁的报告状态为 rejected，不能发布
-curl -X POST http://localhost:8001/api/knowledge/runs/<run_id>/evaluate \
-  -H "Authorization: Bearer <token>"
-
-# 查看评测报告并发布通过门禁的版本
-curl http://localhost:8001/api/knowledge/runs/<run_id>/evaluation \
-  -H "Authorization: Bearer <token>"
-curl -X POST http://localhost:8001/api/knowledge/runs/<run_id>/promote \
-  -H "Authorization: Bearer <token>"
-
-# 查看当前活动版本；必要时回滚到直接上一完整版本
-curl http://localhost:8001/api/knowledge/active-version \
-  -H "Authorization: Bearer <token>"
-curl -X POST http://localhost:8001/api/knowledge/runs/<run_id>/rollback \
-  -H "Authorization: Bearer <token>"
-```
-
-执行前会再次校验完整文件清单与内容哈希。成功响应中的 `staging_collection`、`chunk_count` 与 `vector_store_writes` 用于审计，不代表内容已经发布；只有评测通过并显式调用 `promote` 后 Search/Ask 才会使用该版本。OCR、解析、Embedding 或存储失败会返回脱敏错误分类并清理该运行的全部 staging 数据。
 
 ## License
 
