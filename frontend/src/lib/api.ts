@@ -99,6 +99,13 @@ export const knowledge = {
       `${V1}/knowledge/search?q=${encodeURIComponent(q)}&top_k=${topK}`
     ),
 
+  /** 按 source 元数据删除该文档的全部 chunk */
+  deleteSource: (source: string) =>
+    request<{ status: string; source: string; message: string }>(
+      `${V1}/knowledge/source?source=${encodeURIComponent(source)}`,
+      { method: "DELETE" }
+    ),
+
   ask: (question: string, topK = 5) =>
     request<{ answer: string; sources: { filename: string; chunk: string }[] }>(
       `${V1}/knowledge/ask`,

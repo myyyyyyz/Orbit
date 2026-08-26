@@ -1,0 +1,27 @@
+# ─────────────────────────────────────────────────────────────
+# 前端生产镜像排除项
+# node_modules 必须排除：由容器内 npm ci 按目标平台重新安装
+# ─────────────────────────────────────────────────────────────
+
+node_modules/
+.next/
+out/
+build/
+
+# 测试
+test/
+**/*.test.ts
+**/*.test.tsx
+coverage/
+vitest.config.ts
+
+# 环境（NEXT_PUBLIC_* 通过构建参数注入）
+.env
+.env.*
+!.env.example
+
+# 开发工具
+.vscode/
+.idea/
+*.log
+.DS_Store

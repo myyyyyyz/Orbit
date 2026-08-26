@@ -1,38 +1,67 @@
 # Orbit — 一键启动全栈服务
-# docker compose up -d
-
-version: "3.8"
+#
+#   cp .env.example .env   # 填入 LLM_API_KEY / SECRET_KEY
+#   docker compose up -d --build
+#
+# 前端 http://localhost:3000 ｜ 后端 http://localhost:8001/docs
 
 services:
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    image: orbit-backend:latest
     container_name: orbit-backend
     ports:
-      - "8001:8001"
+      - "${BACKEND_PORT:-8001}:8001"
     volumes:
+      # 向量库 / 上传件 / 用量日志 全部落在此卷，与 DATA_DIR 一致
       - orbit_data:/app/data
-      - ./backend/.env:/app/.env:ro
+      # 知识库源文件目录（Knowledge Agent 只允许在此范围内规划）
+      - ./knowledge:/app/knowledge:ro
     environment:
-      - ENV=${ENV:-production}
-      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000}
+      ENV: production
+      # 数据根目录必须与上方 volume 挂载点一致
+      DATA_DIR: /app/data
+      DATABASE_URL: sqlite:////app/data/multitenant.db
+      # 以下从 .env 注入，缺失时服务会拒绝启动（配置校验）
+      LLM_API_KEY: ${LLM_API_KEY:?LLM_API_KEY 未设置，请先配置 .env}
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY 未设置，请先配置 .env}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.deepseek.com/v1/chat/completions}
+      LLM_MODEL: ${LLM_MODEL:-deepseek-chat}
+      LLM_FALLBACK_MODEL: ${LLM_FALLBACK_MODEL:-}
+      LLM_FALLBACK_API_KEY: ${LLM_FALLBACK_API_KEY:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      KNOWLEDGE_ROOT: /app/knowledge
+      ENABLE_PROMETHEUS: ${ENABLE_PROMETHEUS:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      test:
+        - CMD-SHELL
+        - >-
+          python -c "import urllib.request,sys;
+          r=urllib.request.urlopen('http://localhost:8001/health',timeout=5);
+          sys.exit(0 if r.status==200 else 1)"
       interval: 30s
       timeout: 10s
       retries: 3
+      # Embedding 模型首次加载较慢，给足预热时间
+      start_period: 90s
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        # 构建期注入：Next.js 的 NEXT_PUBLIC_* 在打包时内联
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8001}
+    image: orbit-frontend:latest
     container_name: orbit-frontend
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PORT:-3000}:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=http://backend:8001
+      NODE_ENV: production
     depends_on:
       backend:
         condition: service_healthy

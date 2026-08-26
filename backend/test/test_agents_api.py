@@ -33,14 +33,19 @@ REVIEW_PASS = {"verdict": "ALL_PASS", "stage_results": [], "fail_reason": "", "f
 
 @pytest.fixture()
 def mock_loop_llm(monkeypatch):
-    """mock orchestrator 的 LLM 调用（api 层测试不真正调模型）。"""
+    """mock orchestrator 的 LLM 调用（api 层测试不真正调模型）。
+
+    越界兜底：loop 由 asyncio.create_task 后台启动，实际调用次数可能超出
+    预设序列（重试、跨测试残留任务等），越界时复用最后一个响应，
+    避免 IndexError 冒泡成随机失败。
+    """
     calls = {"n": 0}
     responses = [PLAN_JSON, BUILD_JSON, REVIEW_PASS]
 
     def fake_urlopen(req, timeout=None, **kwargs):
         idx = calls["n"]
         calls["n"] += 1
-        content = responses[idx]
+        content = responses[idx] if idx < len(responses) else responses[-1]
 
         class _FakeResp:
             def __enter__(self):

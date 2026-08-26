@@ -1,10 +1,12 @@
-"""多租户数据库：连接、路径解析、建表（通过 Alembic 迁移管理）。
+"""多租户数据库：连接、路径解析、schema 迁移（Alembic 管理）。
 
-数据迁移文件位于 alembic/versions/，使用 `alembic upgrade head` 管理 schema 变更。
+迁移文件位于 alembic/versions/，由 `alembic upgrade head` 管理 schema 版本。
 """
 
 import os
 import sqlite3
+import threading
+
 from alembic.config import Config as AlembicConfig
 from alembic import command
 
@@ -22,6 +24,22 @@ def _resolve_db_path() -> str:
 
 DB_PATH = _resolve_db_path()
 
+# ─────────────────────────────────────────────────────────────
+# 迁移只执行一次
+#
+# 业务函数（register_user / create_session 等）历史上都会调用 init_db()，
+# 若每次都跑 alembic upgrade 会有两个问题：
+#   1) 性能：每次注册/登录都完整执行一遍迁移链路
+#   2) 并发：alembic 的 run_env() 依赖模块级全局 proxy（EnvironmentContext），
+#      并发进入时先退出的一方会 del globals_['config']，
+#      后退出的一方随即抛 KeyError: 'config'
+# 因此这里用「一次性标记 + 线程锁」保证进程内只迁移一次，
+# 业务侧继续调用 init_db() 不会有副作用。
+# ─────────────────────────────────────────────────────────────
+
+_migrated = False
+_migrate_lock = threading.Lock()
+
 
 def _get_db():
     conn = sqlite3.connect(DB_PATH)
@@ -29,28 +47,36 @@ def _get_db():
     return conn
 
 
-def init_db():
-    """通过 Alembic 迁移初始化多租户数据库。
+def init_db(force: bool = False) -> None:
+    """确保多租户数据库 schema 已升级到最新版本（进程内幂等）。
 
-    替代了之前的原始 CREATE TABLE 语句，统一由 Alembic 管理 schema 版本。
-    首次运行时自动 `alembic upgrade head`；若数据库已是最新版本则无操作。
+    参数:
+        force: 忽略一次性标记强制重新执行迁移（仅测试/运维场景使用）。
     """
-    # 确保数据目录存在
-    os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
+    global _migrated
 
-    # 如果数据库文件尚不存在，创建一个空文件让 Alembic 可以连接
-    if not os.path.exists(DB_PATH):
-        conn = sqlite3.connect(DB_PATH)
-        conn.close()
+    if _migrated and not force:
+        return
 
-    # 读取 Alembic 配置并执行迁移
-    alembic_ini = os.path.join(os.path.dirname(__file__), "..", "..", "alembic.ini")
-    alembic_cfg = AlembicConfig(alembic_ini)
+    with _migrate_lock:
+        # 双重检查：等锁期间可能已被其他线程完成
+        if _migrated and not force:
+            return
 
-    # 如果有 DATABASE_URL 环境变量，覆盖配置文件中的值
-    db_url = os.getenv("DATABASE_URL")
-    if db_url:
-        alembic_cfg.set_main_option("sqlalchemy.url", db_url)
+        # 确保数据目录存在
+        os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
 
-    # P0-4: 自动执行所有未应用的迁移
-    command.upgrade(alembic_cfg, "head")
+        # 数据库文件不存在时先建空文件，供 Alembic 连接
+        if not os.path.exists(DB_PATH):
+            sqlite3.connect(DB_PATH).close()
+
+        alembic_ini = os.path.join(os.path.dirname(__file__), "..", "..", "alembic.ini")
+        alembic_cfg = AlembicConfig(alembic_ini)
+
+        # DATABASE_URL 环境变量优先于 alembic.ini 中的配置
+        db_url = os.getenv("DATABASE_URL")
+        if db_url:
+            alembic_cfg.set_main_option("sqlalchemy.url", db_url)
+
+        command.upgrade(alembic_cfg, "head")
+        _migrated = True

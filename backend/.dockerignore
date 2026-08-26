@@ -1,0 +1,34 @@
+# ─────────────────────────────────────────────────────────────
+# 后端生产镜像排除项
+# 目标：镜像只含运行时必需文件，减小体积与攻击面
+# ─────────────────────────────────────────────────────────────
+
+# 测试
+test/
+**/test_*.py
+**/*_test.py
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+
+# 本地数据（容器内由 volume 挂载 /app/data 提供）
+data/
+*.db
+*.sqlite3
+
+# 环境与密钥（运行时由 compose environment 注入）
+.env
+.env.*
+!.env.example
+
+# 开发工具
+.vscode/
+.idea/
+*.log

@@ -7,12 +7,12 @@ import {
   Search,
   Settings,
   Plus,
-  Zap,
   Sliders,
   Menu,
   X,
   Trash2,
   LogOut,
+  LogIn,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 
@@ -50,73 +50,106 @@ export function Sidebar({
   onToggle,
 }: SidebarProps) {
   const { isAuthenticated, username, logout } = useAuth();
+
+  /** 访客模式下引导登录：清除跳过标记并回到登录页 */
+  const handleSignIn = () => {
+    localStorage.removeItem("orbit_skip_login");
+    window.location.reload();
+  };
+
   return (
     <>
-      {/* Mobile overlay */}
+      {/* 移动端遮罩 */}
       {isOpen && (
         <div
-          className="fixed inset-0 z-40 bg-black/60 md:hidden"
+          className="fixed inset-0 z-40 bg-black/65 backdrop-blur-sm md:hidden"
           onClick={onToggle}
+          aria-hidden
         />
       )}
 
-      {/* Mobile hamburger */}
+      {/* 移动端汉堡按钮 */}
       <button
         onClick={onToggle}
-        className="fixed top-3 left-3 z-50 rounded-lg border border-border bg-surface p-2 md:hidden cursor-pointer"
+        aria-label={isOpen ? "关闭菜单" : "打开菜单"}
+        className="fixed left-3 top-3 z-50 rounded-lg border border-border bg-surface/90 p-2
+                   backdrop-blur transition-colors hover:bg-surface-elevated md:hidden cursor-pointer"
       >
         {isOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
       </button>
 
       <aside
         className={cn(
-          "flex h-full w-[260px] shrink-0 flex-col border-r border-border bg-[#0c1525] z-50",
-          "fixed top-0 left-0 bottom-0 md:static",
-          "transition-transform duration-200",
+          "z-50 flex h-full w-[248px] shrink-0 flex-col border-r border-border bg-surface-sunken",
+          "fixed bottom-0 left-0 top-0 md:static",
+          "transition-transform duration-250 ease-out",
           isOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
         )}
       >
-        {/* Logo */}
-        <div className="flex items-center gap-2.5 px-5 py-4 border-b border-border/50">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15">
-            <Zap className="h-4 w-4 text-primary" />
+        {/* 品牌区 */}
+        <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-border px-4">
+          <div
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-border-strong
+                       bg-surface-elevated ring-highlight"
+          >
+            <OrbitMark />
           </div>
-          <span className="text-base font-semibold tracking-tight">Orbit</span>
+          <div className="min-w-0">
+            <div className="text-[0.9375rem] font-semibold leading-tight tracking-tight">Orbit</div>
+            <div className="text-[0.625rem] leading-tight text-muted-subtle">AI Agent 工作台</div>
+          </div>
         </div>
 
-        {/* Navigation */}
-        <nav className="px-3 py-3 space-y-0.5">
+        {/* 新对话 */}
+        <div className="px-3 pb-1 pt-3">
           <button
             onClick={onNewChat}
-            className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm
-                       text-muted hover:bg-surface hover:text-foreground
-                       transition-colors duration-150 cursor-pointer"
+            className="group flex w-full items-center gap-2 rounded-lg border border-border bg-surface
+                       px-3 py-2 text-[0.8125rem] font-medium text-foreground-muted
+                       transition-all duration-150
+                       hover:border-primary/40 hover:bg-primary-soft hover:text-primary
+                       cursor-pointer"
           >
-            <Plus className="h-4 w-4" />
+            <Plus className="h-4 w-4 transition-transform duration-200 group-hover:rotate-90" />
             新对话
           </button>
+        </div>
 
-          {navItems.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => { onTabChange(item.id); onToggle(); }}
-              className={cn(
-                "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors duration-150 cursor-pointer",
-                activeTab === item.id
-                  ? "bg-primary/15 text-primary font-medium"
-                  : "text-muted hover:bg-surface hover:text-foreground"
-              )}
-            >
-              <item.icon className="h-4 w-4" />
-              {item.label}
-            </button>
-          ))}
+        {/* 导航 */}
+        <nav className="space-y-0.5 px-3 py-2" aria-label="主导航">
+          {navItems.map((item) => {
+            const active = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => {
+                  onTabChange(item.id);
+                  onToggle();
+                }}
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "relative flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[0.8125rem]",
+                  "transition-colors duration-150 cursor-pointer",
+                  active
+                    ? "bg-primary-soft font-medium text-primary"
+                    : "text-muted hover:bg-surface hover:text-foreground"
+                )}
+              >
+                {/* 激活指示条 */}
+                {active && (
+                  <span className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-r-full bg-primary" />
+                )}
+                <item.icon className="h-4 w-4 shrink-0" />
+                {item.label}
+              </button>
+            );
+          })}
         </nav>
 
-        {/* Conversation History */}
+        {/* 历史对话 */}
         {activeTab === "chat" && conversations.length > 0 && (
-          <div className="flex-1 overflow-y-auto px-3 py-2">
-            <p className="px-3 text-[11px] font-medium uppercase tracking-wider text-muted/60 mb-1.5">
+          <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-2">
+            <p className="mb-1.5 px-3 pt-1 text-[0.625rem] font-medium uppercase tracking-wider text-muted-subtle">
               历史对话
             </p>
             <div className="space-y-0.5">
@@ -124,23 +157,30 @@ export function Sidebar({
                 <div
                   key={conv.id}
                   className={cn(
-                    "group flex items-center rounded-lg px-3 py-1.5 transition-colors duration-150",
+                    "group flex items-center rounded-lg pl-3 pr-1 transition-colors duration-150",
                     activeConversation === conv.id
                       ? "bg-surface text-foreground"
-                      : "text-muted hover:bg-surface/50"
+                      : "text-muted hover:bg-surface/60"
                   )}
                 >
                   <button
-                    onClick={() => { onSelectConversation(conv.id); onToggle(); }}
-                    className="flex-1 truncate text-left text-xs cursor-pointer"
+                    onClick={() => {
+                      onSelectConversation(conv.id);
+                      onToggle();
+                    }}
+                    className="flex-1 truncate py-1.5 text-left text-xs cursor-pointer"
                   >
                     {conv.title}
                   </button>
                   <button
-                    onClick={(e) => { e.stopPropagation(); onDeleteConversation(conv.id); }}
-                    className="rounded p-0.5 text-muted/20 opacity-0 group-hover:opacity-100
-                               hover:text-error hover:bg-error/10 transition-all duration-150 cursor-pointer shrink-0"
-                    title="删除对话"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteConversation(conv.id);
+                    }}
+                    aria-label={`删除对话 ${conv.title}`}
+                    className="shrink-0 rounded p-1 text-muted-subtle opacity-0 transition-all duration-150
+                               hover:bg-error-soft hover:text-error group-hover:opacity-100
+                               focus-visible:opacity-100 cursor-pointer"
                   >
                     <Trash2 className="h-3 w-3" />
                   </button>
@@ -150,32 +190,72 @@ export function Sidebar({
           </div>
         )}
 
-        {/* Footer */}
-        <div className="border-t border-border/50 px-4 py-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-muted">Orbit v1.0</span>
-          </div>
-          {/* Bug #18: 用户信息 + 登出入口 */}
-          {isAuthenticated && (
-            <div className="mt-2 flex items-center gap-2 rounded-lg bg-surface/40 px-2.5 py-2">
-              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/20 text-[10px] font-semibold text-primary">
+        {/* 撑开剩余空间，保证 footer 贴底 */}
+        <div className="flex-1" />
+
+        {/* 底部：账号区 */}
+        <div className="shrink-0 border-t border-border p-3">
+          {isAuthenticated ? (
+            <div className="flex items-center gap-2 rounded-lg bg-surface px-2.5 py-2">
+              <div
+                className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-primary/20
+                           text-[0.625rem] font-semibold text-primary"
+              >
                 {(username || "U").slice(0, 1).toUpperCase()}
               </div>
-              <span className="min-w-0 flex-1 truncate text-xs text-foreground/85">
-                {username || "已登录"}
-              </span>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-xs text-foreground">{username || "已登录"}</div>
+              </div>
               <button
-                onClick={() => { logout(); }}
-                className="shrink-0 rounded p-1 text-muted/50 hover:text-error hover:bg-error/10
-                           transition-colors duration-150 cursor-pointer"
+                onClick={logout}
+                aria-label="退出登录"
                 title="退出登录"
+                className="shrink-0 rounded p-1 text-muted-subtle transition-colors duration-150
+                           hover:bg-error-soft hover:text-error cursor-pointer"
               >
                 <LogOut className="h-3.5 w-3.5" />
               </button>
             </div>
+          ) : (
+            <button
+              onClick={handleSignIn}
+              className="flex w-full items-center gap-2 rounded-lg bg-surface px-2.5 py-2
+                         text-left transition-colors duration-150 hover:bg-surface-elevated cursor-pointer"
+            >
+              <div className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-warning-soft">
+                <span className="h-1.5 w-1.5 rounded-full bg-warning" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-xs text-foreground-muted">访客模式</div>
+                <div className="text-[0.625rem] text-muted-subtle">点击登录解锁全部能力</div>
+              </div>
+              <LogIn className="h-3.5 w-3.5 shrink-0 text-muted-subtle" />
+            </button>
           )}
+
+          <div className="mt-2 px-1 text-[0.625rem] text-muted-subtle">Orbit v1.0</div>
         </div>
       </aside>
     </>
+  );
+}
+
+/** 品牌标识：轨道环绕 */
+function OrbitMark() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 26 26" fill="none" aria-hidden>
+      <ellipse
+        cx="13"
+        cy="13"
+        rx="11"
+        ry="5.5"
+        stroke="var(--primary)"
+        strokeWidth="1.6"
+        opacity="0.75"
+        transform="rotate(-28 13 13)"
+      />
+      <circle cx="13" cy="13" r="3.8" fill="var(--primary)" />
+      <circle cx="22.2" cy="8.4" r="2.1" fill="var(--accent)" />
+    </svg>
   );
 }

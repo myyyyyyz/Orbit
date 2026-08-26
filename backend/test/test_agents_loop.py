@@ -10,6 +10,7 @@
 
 import json
 import asyncio
+import uuid
 
 import pytest
 
@@ -283,21 +284,64 @@ class TestAdjustLoop:
 
 class TestLoopOrchestrator:
     def _patch_llm(self, monkeypatch, responses):
-        """按调用次数依次返回不同响应（planner/builder/reviewer 各一次）。"""
-        calls = {"n": 0}
+        """按 Agent 角色路由响应，与调用顺序解耦。
 
-        def fake_urlopen(req, timeout=None, **kwargs):
-            body = json.loads(req.data.decode())
-            idx = calls["n"]
-            calls["n"] += 1
-            content = responses[idx]
-            return _FakeResp(content)
+        为什么不按调用次序：API 层测试用 asyncio.create_task 启动 loop，
+        且 client fixture 是 session 级，后台 loop 会跨测试存活。这些泄漏
+        调用会打乱共享的次序计数器，导致本测试的 Planner 拿到 Reviewer 的
+        响应（表现为随机 status=failed）。
+        改为按 system prompt 里的角色标识分派，每个角色维护独立序列，
+        角色之间互不干扰；序列耗尽时复用该角色最后一个响应。
+        """
+        # 按响应形状归类到角色（plan 有 steps / build 有 changed_files / review 有 verdict）
+        buckets: dict[str, list] = {"planner": [], "builder": [], "reviewer": []}
+        for item in responses:
+            if "verdict" in item:
+                buckets["reviewer"].append(item)
+            elif "changed_files" in item:
+                buckets["builder"].append(item)
+            else:
+                buckets["planner"].append(item)
 
-        monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+        cursors = {role: 0 for role in buckets}
+
+        # 各角色 prompt 都以「你是 Agent Loop 团队的 X。」开头；
+        # 不能用子串匹配（Builder / User Agent 的 prompt 正文也会提到 Reviewer）
+        role_markers = (
+            ("你是 Agent Loop 团队的 Reviewer", "reviewer"),
+            ("你是 Agent Loop 团队的 Builder", "builder"),
+            ("你是 Agent Loop 团队的 Planner", "planner"),
+        )
+
+        def fake_call_llm_sync(agent_prompt, user_context, api_key, model):
+            role = None
+            for marker, name in role_markers:
+                if marker in agent_prompt:
+                    role = name
+                    break
+            if role is None:
+                # Master / User Agent 等其他角色：返回空 JSON，不消耗任何序列
+                return "{}", {"total_tokens": 10}
+
+            seq = buckets[role]
+            if not seq:
+                raise AssertionError(f"测试未为角色 {role} 提供 mock 响应")
+            idx = min(cursors[role], len(seq) - 1)
+            cursors[role] += 1
+            content = seq[idx]
+            return json.dumps(content, ensure_ascii=False), {"total_tokens": 100}
+
+        monkeypatch.setattr(
+            "app.agents.orchestrator._call_llm_sync", fake_call_llm_sync
+        )
 
     def _run(self, monkeypatch, session, responses, decisions):
         self._patch_llm(monkeypatch, responses)
-        loop_id = db.create_loop_group(None, session, "写 hello.py")
+        # 每个测试用唯一 project_dir：分支锁 key 为 branch-lock:{basename}:{branch}，
+        # 若共享 project_dir="" 则所有 loop 测试争抢同一把锁，残留锁会让后续
+        # loop 被 skip（status=failed），造成随机失败。唯一目录从根上消除竞争。
+        project_dir = f"/tmp/orbit-test-{session}-{uuid.uuid4().hex[:8]}"
+        loop_id = db.create_loop_group(None, session, "写 hello.py", project_dir)
         return loop_id, asyncio.run(_run_loop_with_decisions(loop_id, "sk-test", "deepseek-chat", decisions))
 
     def test_happy_path_all_pass(self, monkeypatch):

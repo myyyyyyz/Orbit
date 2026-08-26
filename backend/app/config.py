@@ -9,6 +9,22 @@ import os
 import sys
 from typing import Optional, Literal
 
+# ─────────────────────────────────────────────────────────────
+# 数据根目录解析
+#
+# 优先级：DATA_DIR 环境变量 > 项目根 data/
+# 项目根 = 本文件（backend/app/config.py）向上两级。
+# Docker 场景请显式设置 DATA_DIR=/app/data，与 volume 挂载点保持一致。
+# ─────────────────────────────────────────────────────────────
+
+_PROJECT_ROOT = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..")
+)
+
+DATA_DIR = os.path.abspath(
+    os.getenv("DATA_DIR") or os.path.join(_PROJECT_ROOT, "data")
+)
+
 
 class ChunkStrategy:
     """切割策略"""
@@ -88,8 +104,8 @@ class StorageStrategy:
     # Collection 名称
     collection: str = "documents"
 
-    # 持久化目录 → 统一输出到 Orbit/data/chroma_db
-    persist_dir: str = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "data", "chroma_db")
+    # 持久化目录 → 统一输出到 <DATA_DIR>/chroma_db
+    persist_dir: str = os.path.join(DATA_DIR, "chroma_db")
 
 
 class RetrievalStrategy:
@@ -155,7 +171,7 @@ class Settings:
     rag: RAGStrategy = RAGStrategy()
 
     # Upload
-    UPLOAD_DIR: str = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "data", "uploads")
+    UPLOAD_DIR: str = os.path.join(DATA_DIR, "uploads")
     MAX_FILE_SIZE: int = 20 * 1024 * 1024  # 20 MB
 
     # 数据库 URL 抽象（默认 SQLite，生产可切 PostgreSQL）

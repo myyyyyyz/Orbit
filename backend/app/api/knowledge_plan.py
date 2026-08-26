@@ -1,6 +1,7 @@
 """Authenticated, non-ingesting Knowledge Agent planning endpoint."""
 
 
+import os
 from pathlib import Path
 from typing import Any, Optional
 
@@ -34,8 +35,13 @@ from ..knowledge_agent.staging_store import StagingStore, StorageFailed
 from ..middleware.auth import get_current_user
 
 
-router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
-_KNOWLEDGE_ROOT = Path(__file__).resolve().parents[3] / "knowledge"
+router = APIRouter(prefix="/api/v1/knowledge", tags=["knowledge"])
+# 知识源根目录：KNOWLEDGE_ROOT 环境变量优先（容器内为 /app/knowledge），否则项目根 knowledge/
+# Knowledge Agent 只允许在此目录内规划，越界请求会被 _assert_descendant 拒绝
+_KNOWLEDGE_ROOT = Path(
+    os.getenv("KNOWLEDGE_ROOT")
+    or Path(__file__).resolve().parents[3] / "knowledge"
+).resolve()
 _EVALUATION_DATASET = _KNOWLEDGE_ROOT / "evals" / "questions.jsonl"
 
 

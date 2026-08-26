@@ -18,6 +18,7 @@ from typing import Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from ..config import DATA_DIR
 from ..middleware.auth import get_optional_user
 from ..stream.sse import _sse
 from . import db
@@ -95,6 +96,22 @@ async def api_start_loop(
     )
 
     return {"loop_id": loop_id, "status": "running", "message": "Agent Loop 已启动"}
+
+
+# ── Global kill switch ─────────────────────────────────────────────
+# 必须注册在 /loop/{loop_id} 之前：FastAPI 按顺序匹配路由，
+# 否则字面量 "pause-all" 会被当作 loop_id 解析成 int 并返回 422。
+
+@router.get("/loop/pause-all")
+def api_get_pause_all():
+    return GlobalSwitchOut(key="loop-pause-all", value=get_pause_all())
+
+
+@router.post("/loop/pause-all")
+async def api_set_pause_all(body: dict = Body(...)):
+    value = bool(body.get("paused", False))
+    set_pause_all(value)
+    return GlobalSwitchOut(key="loop-pause-all", value=value)
 
 
 @router.get("/loop/{loop_id}")
@@ -272,17 +289,10 @@ async def api_delete_schedule(
 
 
 # ── Global kill switch endpoints ───────────────────────────────────
-
-@router.get("/loop/pause-all")
-def api_get_pause_all():
-    return GlobalSwitchOut(key="loop-pause-all", value=get_pause_all())
-
-
-@router.post("/loop/pause-all")
-async def api_set_pause_all(body: dict = Body(...)):
-    value = bool(body.get("paused", False))
-    set_pause_all(value)
-    return GlobalSwitchOut(key="loop-pause-all", value=value)
+#
+# 注意：这两个路由已上移到 /loop/{loop_id} 之前（见文件前部）。
+# FastAPI 按注册顺序匹配，若 /loop/{loop_id} 在前，会把字面量
+# "pause-all" 当作 loop_id 解析成 int 并返回 422。
 
 
 @router.get("/memory/scan")
@@ -300,7 +310,7 @@ def api_memory_scan(
     root = (request.query_params.get("root") or "").strip()
     if not root:
         root = os.getenv("FILE_MEMORY_ROOT", "") or os.path.join(
-            os.path.dirname(__file__), "..", "..", "..", "data", "memory"
+            DATA_DIR, "memory"
         )
     files = scan_memory_files(root)
     return {
@@ -334,7 +344,7 @@ async def api_memory_select(
     root = (body.get("root") or "").strip()
     if not root:
         root = os.getenv("FILE_MEMORY_ROOT", "") or os.path.join(
-            os.path.dirname(__file__), "..", "..", "..", "data", "memory"
+            DATA_DIR, "memory"
         )
     api_key = request.headers.get("X-API-Key") or None
     model = (body.get("model") or "").strip() or request.headers.get("X-LLM-Model") or None

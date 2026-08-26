@@ -13,6 +13,27 @@ Planner (只读) → Builder (执行) → Reviewer (验证) → 🔄 Looping
 
 ---
 
+## 与 Orbit backend 的关系（单一核心 + 双壳）
+
+> 落地文档：`backend/app/agents/` 是 **loop 核心的唯一权威实现**（P0 统一后）。
+> 本目录是 **offline 壳**：无后端、纯文件协议、任意 LLM CLI 可跑的降级形态。
+
+| 层 | 权威实现 | 本目录的角色 |
+|----|---------|-------------|
+| **核心状态机**（Planner→Builder→Reviewer 熔断/预算/gate/归档） | `backend/app/agents/orchestrator.py` | 参考协议（`skills/loop-engine/SKILL.md` 12 步） |
+| **Agent 角色 Prompt**（JSON 输出版，Pydantic 校验） | `backend/app/agents/prompts.py` | 协议文档（`agents/*.md`，含影响面/两阶段审要求） |
+| **Agent 资产**（skills/scenes/agents） | 由 `backend/app/agents/registry.py` **服务发现**本目录 | **本目录是资产的唯一存放处**（P2 注册表扫描这里） |
+| **Schema**（Plan/BuildOutput/ReviewResult） | `backend/app/agents/schemas.py` | 参考（`run-loop.sh` 用 grep 解析的降级替代） |
+
+**关键约束**：
+- 新增 skill / scene / agent 角色 → 只改本目录（`skills/*/SKILL.md` / `scenes/*.md` / `agents/*.md`），
+  backend 事件版通过 `registry.py` 自动发现，无需改后端代码。
+- 修改角色核心要求（影响面分析/两阶段审/测试分级）→ 改 `backend/app/agents/prompts.py`（权威），
+  并同步 `agents/*.md` 协议文档。
+- `run-loop.sh` 是零依赖 fallback，行为以事件版为准，不维护独立逻辑。
+
+---
+
 ## 快速开始
 
 ### 方式一：CodeBuddy（全自动）
