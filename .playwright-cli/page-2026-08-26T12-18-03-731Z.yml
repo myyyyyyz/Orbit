@@ -1,0 +1,64 @@
+- generic [active] [ref=f6e1]:
+  - generic [ref=f6e2]:
+    - complementary [ref=f6e3]:
+      - generic [ref=f6e10]:
+        - generic [ref=f6e11]: Orbit
+        - generic [ref=f6e12]: AI Agent 工作台
+      - button "新对话" [ref=f6e14] [cursor=pointer]
+      - navigation "主导航" [ref=f6e16]:
+        - button "对话" [ref=f6e17] [cursor=pointer]
+        - button "知识库" [ref=f6e21] [cursor=pointer]
+        - button "搜索" [ref=f6e24] [cursor=pointer]
+        - button "策略配置" [ref=f6e28] [cursor=pointer]
+        - button "设置" [ref=f6e30] [cursor=pointer]
+      - generic [ref=f6e35]:
+        - button "访客模式 点击登录解锁全部能力" [ref=f6e36] [cursor=pointer]:
+          - generic [ref=f6e39]:
+            - generic [ref=f6e40]: 访客模式
+            - generic [ref=f6e41]: 点击登录解锁全部能力
+        - generic [ref=f6e45]: Orbit v1.0
+    - main [ref=f6e46]:
+      - generic [ref=f6e48]:
+        - generic [ref=f6e51]:
+          - heading "有什么我可以帮助你的？" [level=1] [ref=f6e52]
+          - paragraph [ref=f6e53]:
+            - text: 查询知识库、分析文档，或用
+            - code [ref=f6e54]: /loop
+            - text: 委派 Agent 执行任务
+          - generic [ref=f6e55]:
+            - button "知识库检索 总结我上传的文档" [ref=f6e56] [cursor=pointer]:
+              - generic [ref=f6e57]: 知识库检索
+              - generic [ref=f6e61]: 总结我上传的文档
+            - button "语义问答 这个项目有哪些模块" [ref=f6e62] [cursor=pointer]:
+              - generic [ref=f6e63]: 语义问答
+              - generic [ref=f6e67]: 这个项目有哪些模块
+            - button "Agent 编排 /loop 帮我规划一个新功能" [ref=f6e68] [cursor=pointer]:
+              - generic [ref=f6e69]: Agent 编排
+              - generic [ref=f6e74]: /loop 帮我规划一个新功能
+        - generic [ref=f6e76]:
+          - generic [ref=f6e77]:
+            - generic [ref=f6e78]:
+              - generic [ref=f6e84]: 项目
+              - textbox "项目" [ref=f6e85]:
+                - /placeholder: 用于 STATE 脊柱
+            - generic [ref=f6e86]:
+              - generic [ref=f6e90]: 目录
+              - textbox "目录" [ref=f6e91]:
+                - /placeholder: 绝对路径（Builder 落盘）
+            - radiogroup "执行模式" [ref=f6e92]:
+              - radio "交互" [checked] [ref=f6e96] [cursor=pointer]
+              - radio "L1" [ref=f6e97] [cursor=pointer]
+              - radio "L2" [ref=f6e98] [cursor=pointer]
+            - generic [ref=f6e99]:
+              - generic [ref=f6e106]: 预算
+              - spinbutton "Token 预算上限" [ref=f6e107]: "100000"
+              - generic "100,000 tokens" [ref=f6e108]: tok
+          - button "全局暂停" [ref=f6e109]
+        - generic [ref=f6e111]:
+          - generic [ref=f6e113]:
+            - textbox "输入消息... (Enter 发送, Shift+Enter 换行)" [ref=f6e114]
+            - generic [ref=f6e115]:
+              - button "上传文件到知识库" [ref=f6e116] [cursor=pointer]
+              - button "发送" [disabled] [ref=f6e119] [cursor=pointer]
+          - paragraph [ref=f6e123]: Orbit 可能产生不准确信息，请核实重要内容
+  - button "Open Next.js Dev Tools" [ref=f6e129] [cursor=pointer]

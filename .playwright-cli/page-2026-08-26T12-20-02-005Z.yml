@@ -1,0 +1,62 @@
+- generic [ref=f7e2]:
+  - complementary [ref=f7e3]:
+    - generic [ref=f7e10]:
+      - generic [ref=f7e11]: Orbit
+      - generic [ref=f7e12]: AI Agent 工作台
+    - button "新对话" [ref=f7e14] [cursor=pointer]
+    - navigation "主导航" [ref=f7e16]:
+      - button "对话" [ref=f7e17] [cursor=pointer]
+      - button "知识库" [ref=f7e21] [cursor=pointer]
+      - button "搜索" [ref=f7e24] [cursor=pointer]
+      - button "策略配置" [ref=f7e28] [cursor=pointer]
+      - button "设置" [ref=f7e30] [cursor=pointer]
+    - generic [ref=f7e35]:
+      - button "访客模式 点击登录解锁全部能力" [ref=f7e36] [cursor=pointer]:
+        - generic [ref=f7e39]:
+          - generic [ref=f7e40]: 访客模式
+          - generic [ref=f7e41]: 点击登录解锁全部能力
+      - generic [ref=f7e45]: Orbit v1.0
+  - main [ref=f7e46]:
+    - generic [ref=f7e48]:
+      - generic [ref=f7e51]:
+        - heading "有什么我可以帮助你的？" [level=1] [ref=f7e52]
+        - paragraph [ref=f7e53]:
+          - text: 查询知识库、分析文档，或用
+          - code [ref=f7e54]: /loop
+          - text: 委派 Agent 执行任务
+        - generic [ref=f7e55]:
+          - button "知识库检索 总结我上传的文档" [ref=f7e56] [cursor=pointer]:
+            - generic [ref=f7e57]: 知识库检索
+            - generic [ref=f7e61]: 总结我上传的文档
+          - button "语义问答 这个项目有哪些模块" [ref=f7e62] [cursor=pointer]:
+            - generic [ref=f7e63]: 语义问答
+            - generic [ref=f7e67]: 这个项目有哪些模块
+          - button "Agent 编排 /loop 帮我规划一个新功能" [ref=f7e68] [cursor=pointer]:
+            - generic [ref=f7e69]: Agent 编排
+            - generic [ref=f7e74]: /loop 帮我规划一个新功能
+      - generic [ref=f7e76]:
+        - generic [ref=f7e77]:
+          - generic [ref=f7e78]:
+            - generic [ref=f7e84]: 项目
+            - textbox "项目" [ref=f7e85]:
+              - /placeholder: 用于 STATE 脊柱
+          - generic [ref=f7e86]:
+            - generic [ref=f7e90]: 目录
+            - textbox "目录" [ref=f7e91]:
+              - /placeholder: 绝对路径（Builder 落盘）
+          - radiogroup "执行模式" [ref=f7e92]:
+            - radio "交互" [checked] [ref=f7e96] [cursor=pointer]
+            - radio "L1" [ref=f7e97] [cursor=pointer]
+            - radio "L2" [ref=f7e98] [cursor=pointer]
+          - generic [ref=f7e99]:
+            - generic [ref=f7e106]: 预算
+            - spinbutton "Token 预算上限" [ref=f7e107]: "100000"
+            - generic "100,000 tokens" [ref=f7e108]: tok
+        - switch "全局暂停 Agent Loop" [ref=f7e109] [cursor=pointer]: 全局暂停
+      - generic [ref=f7e114]:
+        - generic [ref=f7e116]:
+          - textbox "输入消息... (Enter 发送, Shift+Enter 换行)" [ref=f7e117]
+          - generic [ref=f7e118]:
+            - button "上传文件到知识库" [ref=f7e119] [cursor=pointer]
+            - button "发送" [disabled] [ref=f7e122] [cursor=pointer]
+        - paragraph [ref=f7e126]: Orbit 可能产生不准确信息，请核实重要内容

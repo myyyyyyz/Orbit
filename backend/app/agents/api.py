@@ -98,6 +98,22 @@ async def api_start_loop(
     return {"loop_id": loop_id, "status": "running", "message": "Agent Loop 已启动"}
 
 
+# ── Global kill switch ─────────────────────────────────────────────
+# 必须注册在 /loop/{loop_id} 之前：FastAPI 按顺序匹配路由，
+# 否则字面量 "pause-all" 会被当作 loop_id 解析成 int 并返回 422。
+
+@router.get("/loop/pause-all")
+def api_get_pause_all():
+    return GlobalSwitchOut(key="loop-pause-all", value=get_pause_all())
+
+
+@router.post("/loop/pause-all")
+async def api_set_pause_all(body: dict = Body(...)):
+    value = bool(body.get("paused", False))
+    set_pause_all(value)
+    return GlobalSwitchOut(key="loop-pause-all", value=value)
+
+
 @router.get("/loop/{loop_id}")
 def api_get_loop(loop_id: int, current_user: Optional[dict] = Depends(get_optional_user)):
     """查询 loop 详情 + 全部事件（前端刷新后重放恢复，R4）。"""
@@ -273,17 +289,10 @@ async def api_delete_schedule(
 
 
 # ── Global kill switch endpoints ───────────────────────────────────
-
-@router.get("/loop/pause-all")
-def api_get_pause_all():
-    return GlobalSwitchOut(key="loop-pause-all", value=get_pause_all())
-
-
-@router.post("/loop/pause-all")
-async def api_set_pause_all(body: dict = Body(...)):
-    value = bool(body.get("paused", False))
-    set_pause_all(value)
-    return GlobalSwitchOut(key="loop-pause-all", value=value)
+#
+# 注意：这两个路由已上移到 /loop/{loop_id} 之前（见文件前部）。
+# FastAPI 按注册顺序匹配，若 /loop/{loop_id} 在前，会把字面量
+# "pause-all" 当作 loop_id 解析成 int 并返回 422。
 
 
 @router.get("/memory/scan")

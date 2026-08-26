@@ -1,0 +1,51 @@
+- generic [ref=f8e2]:
+  - complementary [ref=f8e3]:
+    - generic [ref=f8e10]:
+      - generic [ref=f8e11]: Orbit
+      - generic [ref=f8e12]: AI Agent 工作台
+    - button "新对话" [ref=f8e14] [cursor=pointer]
+    - navigation "主导航" [ref=f8e16]:
+      - button "对话" [ref=f8e17] [cursor=pointer]
+      - button "知识库" [ref=f8e21] [cursor=pointer]
+      - button "搜索" [ref=f8e24] [cursor=pointer]
+      - button "策略配置" [ref=f8e28] [cursor=pointer]
+      - button "设置" [ref=f8e30] [cursor=pointer]
+    - generic [ref=f8e35]:
+      - button "访客模式 点击登录解锁全部能力" [ref=f8e36] [cursor=pointer]:
+        - generic [ref=f8e39]:
+          - generic [ref=f8e40]: 访客模式
+          - generic [ref=f8e41]: 点击登录解锁全部能力
+      - generic [ref=f8e45]: Orbit v1.0
+  - main [ref=f8e46]:
+    - generic [ref=f8e48]:
+      - generic [ref=f8e51]:
+        - heading "有什么我可以帮助你的？" [level=1] [ref=f8e52]
+        - paragraph [ref=f8e53]:
+          - text: 查询知识库、分析文档，或用
+          - code [ref=f8e54]: /loop
+          - text: 委派 Agent 执行任务
+        - generic [ref=f8e55]:
+          - button "知识库检索 总结我上传的文档" [ref=f8e56] [cursor=pointer]:
+            - generic [ref=f8e57]: 知识库检索
+            - generic [ref=f8e61]: 总结我上传的文档
+          - button "语义问答 这个项目有哪些模块" [ref=f8e62] [cursor=pointer]:
+            - generic [ref=f8e63]: 语义问答
+            - generic [ref=f8e67]: 这个项目有哪些模块
+          - button "Agent 编排 /loop 帮我规划一个新功能" [ref=f8e68] [cursor=pointer]:
+            - generic [ref=f8e69]: Agent 编排
+            - generic [ref=f8e74]: /loop 帮我规划一个新功能
+      - generic [ref=f8e78]:
+        - button "Loop 配置 交互 100K tok 未设项目" [ref=f8e79] [cursor=pointer]:
+          - generic [ref=f8e81]: Loop 配置
+          - generic [ref=f8e82]:
+            - generic [ref=f8e83]: 交互
+            - generic [ref=f8e84]: 100K tok
+            - generic [ref=f8e85]: 未设项目
+        - switch "全局暂停 Agent Loop" [ref=f8e88] [cursor=pointer]: 全局暂停
+      - generic [ref=f8e93]:
+        - generic [ref=f8e95]:
+          - textbox "输入消息... (Enter 发送, Shift+Enter 换行)" [ref=f8e96]
+          - generic [ref=f8e97]:
+            - button "上传文件到知识库" [ref=f8e98] [cursor=pointer]
+            - button "发送" [disabled] [ref=f8e101] [cursor=pointer]
+        - paragraph [ref=f8e105]: Orbit 可能产生不准确信息，请核实重要内容

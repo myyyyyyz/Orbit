@@ -79,19 +79,9 @@ export default function Home() {
     if (activeConversation === id) setActiveConversation(null);
   }, [activeConversation]);
 
-  // Bug #17: 未登录且未跳过 → 登录/注册页（可跳过匿名使用）
+  // 未登录且未跳过 → 登录/注册页（可跳过匿名使用）
   if (showAuth && !isAuthenticated) {
-    return (
-      <div className="relative min-h-screen">
-        <AuthForm />
-        <button
-          onClick={handleSkipAuth}
-          className="absolute bottom-8 left-1/2 -translate-x-1/2 text-xs text-muted hover:text-foreground transition-colors cursor-pointer"
-        >
-          跳过，稍后登录
-        </button>
-      </div>
-    );
+    return <AuthForm onSkip={handleSkipAuth} />;
   }
 
   if (showOnboarding) {

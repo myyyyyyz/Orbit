@@ -7,6 +7,7 @@ import { AgentLoopCard, AgentStep } from "./agent-loop-card";
 import { knowledge, agents, LoopEvent } from "@/lib/api";
 import { PauseAllSwitch } from "./pause-all-switch";
 import { LoopSettingsBar } from "./loop-settings-bar";
+import { FileText, Search, Workflow } from "lucide-react";
 
 interface LoopViewState {
   loopId: number;
@@ -383,23 +384,57 @@ export function ChatInterface() {
       {/* Messages */}
       <div className="flex-1 overflow-y-auto" ref={scrollContainerRef} onScroll={handleScroll}>
         {messages.length === 0 && !loopView ? (
-          <div className="flex h-full items-center justify-center px-4">
-            <div className="text-center max-w-md">
-              <h1 className="text-2xl font-semibold tracking-tight mb-2">
+          <div className="relative flex h-full items-center justify-center px-4">
+            {/* 背景氛围光斑，避免大面积空白 */}
+            <div
+              className="ambient-glow"
+              style={{
+                width: 460,
+                height: 300,
+                top: "18%",
+                left: "50%",
+                marginLeft: -230,
+                background: "var(--primary)",
+                opacity: 0.16,
+              }}
+              aria-hidden
+            />
+
+            <div className="relative w-full max-w-lg text-center">
+              <h1 className="mb-2.5 text-[1.625rem] font-semibold tracking-tight">
                 有什么我可以帮助你的？
               </h1>
-              <p className="text-sm text-muted leading-relaxed mb-4">
-                我可以帮你查询知识库、分析文档、委派 Agent 执行任务。
+              <p className="mb-7 text-sm leading-relaxed text-muted">
+                查询知识库、分析文档，或用{" "}
+                <code className="rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-[0.75rem] text-primary">
+                  /loop
+                </code>{" "}
+                委派 Agent 执行任务
               </p>
-              <div className="flex flex-wrap justify-center gap-2">
-                {["总结我上传的文档", "这个项目有哪些模块", "/loop 帮我规划一个新功能"].map((q) => (
+
+              {/* 建议问题：卡片式，带图标与描述，比纯文字胶囊更有引导性 */}
+              <div className="grid gap-2 text-left sm:grid-cols-3">
+                {[
+                  { q: "总结我上传的文档", icon: FileText, hint: "知识库检索" },
+                  { q: "这个项目有哪些模块", icon: Search, hint: "语义问答" },
+                  { q: "/loop 帮我规划一个新功能", icon: Workflow, hint: "Agent 编排" },
+                ].map(({ q, icon: Icon, hint }) => (
                   <button
                     key={q}
                     onClick={() => handleSend(q)}
-                    className="rounded-full border border-border/60 px-3 py-1.5 text-xs text-muted
-                               hover:border-primary/30 hover:text-foreground transition-colors duration-150 cursor-pointer"
+                    className="group flex flex-col gap-2 rounded-xl border border-border bg-surface/60 p-3
+                               text-left transition-all duration-200
+                               hover:-translate-y-0.5 hover:border-primary/40 hover:bg-surface
+                               hover:shadow-[0_8px_20px_-10px_var(--primary-glow)]
+                               cursor-pointer"
                   >
-                    {q}
+                    <span className="flex items-center gap-1.5 text-[0.625rem] uppercase tracking-wide text-muted-subtle">
+                      <Icon className="h-3 w-3 transition-colors duration-200 group-hover:text-primary" />
+                      {hint}
+                    </span>
+                    <span className="text-xs leading-relaxed text-foreground-muted transition-colors duration-200 group-hover:text-foreground">
+                      {q}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -447,9 +482,9 @@ export function ChatInterface() {
         )}
       </div>
 
-      {/* P5: loop 运行配置 + 全局暂停开关 */}
-      <div className="border-t border-border/50 bg-surface px-4 py-2">
-        <div className="mx-auto max-w-3xl flex flex-wrap items-center gap-3">
+      {/* P5: loop 运行配置 + 全局暂停开关（默认收起，点击展开编辑） */}
+      <div className="border-t border-border bg-surface-sunken/60 px-4 py-2">
+        <div className="mx-auto max-w-3xl">
           <LoopSettingsBar
             projectName={projectName}
             projectDir={projectDir}
@@ -459,8 +494,8 @@ export function ChatInterface() {
             onProjectDirChange={(v) => { setProjectDir(v); localStorage.setItem("orbit_loop_project_dir", v); }}
             onModeChange={(v) => { setLoopMode(v); localStorage.setItem("orbit_loop_mode", v); }}
             onBudgetChange={(v) => { setBudgetLimit(v); localStorage.setItem("orbit_loop_budget", String(v)); }}
+            actions={<PauseAllSwitch />}
           />
-          <PauseAllSwitch />
         </div>
       </div>
 

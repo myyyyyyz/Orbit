@@ -624,7 +624,9 @@ export function SettingsPanel() {
                         onClick={() => toggleSchedule(s.id, !s.enabled)}
                         className={cn(
                           "rounded px-2 py-1 transition-colors",
-                          s.enabled ? "bg-success/10 text-success" : "bg-muted text-muted-foreground"
+                          s.enabled
+                            ? "bg-success-soft text-success"
+                            : "bg-surface-elevated text-muted"
                         )}
                       >
                         {s.enabled ? "启用" : "禁用"}

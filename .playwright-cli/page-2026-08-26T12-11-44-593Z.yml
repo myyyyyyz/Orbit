@@ -1,0 +1,46 @@
+- generic [ref=f2e2]:
+  - complementary [ref=f2e3]:
+    - generic [ref=f2e4]: Orbit
+    - navigation [ref=f2e9]:
+      - button "新对话" [ref=f2e10] [cursor=pointer]
+      - button "对话" [ref=f2e12] [cursor=pointer]
+      - button "知识库" [ref=f2e15] [cursor=pointer]
+      - button "搜索" [ref=f2e18] [cursor=pointer]
+      - button "策略配置" [ref=f2e22] [cursor=pointer]
+      - button "设置" [ref=f2e24] [cursor=pointer]
+    - generic [ref=f2e28]: Orbit v1.0
+  - main [ref=f2e31]:
+    - generic [ref=f2e33]:
+      - generic [ref=f2e36]:
+        - heading "有什么我可以帮助你的？" [level=1] [ref=f2e37]
+        - paragraph [ref=f2e38]: 我可以帮你查询知识库、分析文档、委派 Agent 执行任务。
+        - generic [ref=f2e39]:
+          - button "总结我上传的文档" [ref=f2e40] [cursor=pointer]
+          - button "这个项目有哪些模块" [ref=f2e41] [cursor=pointer]
+          - button "/loop 帮我规划一个新功能" [ref=f2e42] [cursor=pointer]
+      - generic [ref=f2e44]:
+        - generic [ref=f2e45]:
+          - generic [ref=f2e46]:
+            - text: 项目
+            - textbox "项目" [ref=f2e47]:
+              - /placeholder: 项目名（用于 STATE 脊柱）
+          - generic [ref=f2e48]:
+            - text: 目录
+            - textbox "目录" [ref=f2e49]:
+              - /placeholder: 绝对路径（Builder 落盘）
+          - combobox "interactive：正常执行；L1：只读报告+更新STATE；L2：用户确认后落盘" [ref=f2e50]:
+            - option "交互模式" [selected]
+            - option "L1 报告"
+            - option "L2 行动"
+          - generic [ref=f2e51]:
+            - text: 预算
+            - spinbutton "预算 tokens" [ref=f2e52]: "100000"
+            - text: tokens
+        - button "全局暂停" [ref=f2e53]
+      - generic [ref=f2e55]:
+        - generic [ref=f2e57]:
+          - textbox "输入消息... (Enter 发送, Shift+Enter 换行)" [ref=f2e58]
+          - generic [ref=f2e59]:
+            - button "上传文件到知识库" [ref=f2e60] [cursor=pointer]
+            - button "发送" [disabled] [ref=f2e63] [cursor=pointer]
+        - paragraph [ref=f2e67]: Orbit 可能产生不准确信息，请核实重要内容
