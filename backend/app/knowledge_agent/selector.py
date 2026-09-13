@@ -1,7 +1,3 @@
-from collections.abc import Mapping
-from typing import Any, Optional
-
-from .catalog import STRATEGY_CATALOG, is_compatible
 from .models import CorpusProfile, StrategyDecision
 
 
@@ -27,44 +23,12 @@ def _fallback(profile: CorpusProfile) -> StrategyDecision:
         strategy_id=strategy_id,
         decision_source="fallback",
         confidence=0.8,
-        reason="未获得可用的 Agent 建议，使用与文件画像匹配的确定性兜底策略。",
+        reason="依据文件类型匹配确定性策略，无需 LLM 介入。",
         requires_review=False,
     )
 
 
-def _validated_agent_decision(
-    profile: CorpusProfile, suggestion: Mapping[str, Any]
-) -> Optional[StrategyDecision]:
-    strategy_id = suggestion.get("strategy_id")
-    confidence = suggestion.get("confidence")
-    reason = suggestion.get("reason")
-    requested_review = suggestion.get("requires_review", False)
-    if not isinstance(strategy_id, str) or not is_compatible(strategy_id, profile):
-        return None
-    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
-        return None
-    if not 0.0 <= float(confidence) <= 1.0 or not isinstance(reason, str) or not reason.strip():
-        return None
-    if not isinstance(requested_review, bool):
-        return None
+def select_strategy(profile: CorpusProfile) -> StrategyDecision:
+    """依据文件画像选择切分策略（确定性，无 LLM 覆盖层）。"""
 
-    strategy = STRATEGY_CATALOG[strategy_id]
-    return StrategyDecision(
-        strategy_id=strategy_id,
-        decision_source="agent",
-        confidence=float(confidence),
-        reason=reason.strip(),
-        requires_review=strategy.requires_review or requested_review,
-    )
-
-
-def select_strategy(
-    profile: CorpusProfile, suggestion: Optional[Mapping[str, Any]] = None
-) -> StrategyDecision:
-    """Accept only catalog-compatible Agent output; otherwise use safe rules."""
-
-    if suggestion is not None:
-        decision = _validated_agent_decision(profile, suggestion)
-        if decision is not None:
-            return decision
     return _fallback(profile)

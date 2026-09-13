@@ -3,13 +3,12 @@
 
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from ..config import settings
-from ..knowledge_agent.adapter import OpenAICompatibleKnowledgeAgent
 from ..knowledge_agent.approval import RunNotFound, RunStateConflict, approve_run
 from ..knowledge_agent.execution import execute_run
 from ..knowledge_agent.evaluation import evaluate_run
@@ -46,11 +45,9 @@ _EVALUATION_DATASET = _KNOWLEDGE_ROOT / "evals" / "questions.jsonl"
 
 
 class PlanFolderRequest(BaseModel):
-    """The relative folder to inspect and optional precomputed Agent suggestions."""
+    """The relative folder to inspect for a deterministic strategy plan."""
 
     path: str = Field(min_length=1, description="Path relative to the repository knowledge folder")
-    use_agent: bool = True
-    agent_suggestions: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 def _database_path() -> Path:
@@ -71,14 +68,11 @@ def api_plan_folder(
     if relative_path.is_absolute():
         raise HTTPException(status_code=400, detail="path 必须是 knowledge 目录内的相对路径")
     try:
-        agent = OpenAICompatibleKnowledgeAgent.from_env() if request.use_agent else None
         plan = plan_folder(
             _KNOWLEDGE_ROOT / relative_path,
             knowledge_root=_KNOWLEDGE_ROOT,
             database_path=_database_path(),
             user_id=current_user["user_id"],
-            agent_suggestions=request.agent_suggestions,
-            agent=agent,
         )
     except (ValueError, OSError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

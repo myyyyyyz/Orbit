@@ -29,6 +29,8 @@ export interface AgentStep {
 interface CheckpointState {
   title: string;
   options: string[];
+  kind?: string;                                        // "tool_approval" 时展示待批准命令
+  commands?: { command: string; reason: string }[];
 }
 
 interface FailInfo {
@@ -78,6 +80,17 @@ const decisionLabels: Record<string, string> = {
   approve: "标记完成",
   reject: "拒绝",
 };
+
+// 工具审批（tool_approval）场景下 approve/reject 的专属文案
+const toolApprovalLabels: Record<string, string> = {
+  approve: "允许执行",
+  reject: "拒绝执行",
+};
+
+function checkpointLabel(opt: string, kind?: string): string {
+  if (kind === "tool_approval" && toolApprovalLabels[opt]) return toolApprovalLabels[opt];
+  return decisionLabels[opt] || opt;
+}
 
 export function AgentLoopCard({ task, steps, checkpoint, finished, outcome, failInfo, expandedId, onToggleExpand, onDecision }: AgentLoopCardProps) {
   const [note, setNote] = useState("");
@@ -254,6 +267,19 @@ export function AgentLoopCard({ task, steps, checkpoint, finished, outcome, fail
                 <Clock className="h-3.5 w-3.5 text-accent" />
                 {checkpoint.title}
               </p>
+              {checkpoint.kind === "tool_approval" && checkpoint.commands && checkpoint.commands.length > 0 && (
+                <ul className="mt-2 space-y-1">
+                  {checkpoint.commands.map((c, i) => (
+                    <li
+                      key={i}
+                      className="rounded-md border border-border/50 bg-surface/60 px-2 py-1.5 text-[11px]"
+                    >
+                      <code className="font-mono text-foreground break-all">{c.command}</code>
+                      <span className="ml-1.5 text-muted/70">{c.reason}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
               {/* Bug #14: "调整"需要先填意见再提交（两段式），不能点一下就直接继续 */}
               {adjusting && (
                 <div className="mt-2">
@@ -302,7 +328,7 @@ export function AgentLoopCard({ task, steps, checkpoint, finished, outcome, fail
                                text-[11px] font-medium text-primary hover:bg-primary/20
                                transition-colors duration-150 cursor-pointer"
                   >
-                    {decisionLabels[opt] || opt}
+                    {checkpointLabel(opt, checkpoint.kind)}
                   </button>
                 ))}
               </div>

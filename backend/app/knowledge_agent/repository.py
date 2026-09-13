@@ -9,7 +9,6 @@ import sqlite3
 from pathlib import Path
 
 from .models import (
-    AgentAttempt,
     CorpusProfile,
     FolderPlan,
     KnowledgeRunRecord,
@@ -87,10 +86,6 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
             "PRAGMA table_info(knowledge_agent_documents)"
         ).fetchall()
     }
-    if "agent_attempt_json" not in document_columns:
-        connection.execute(
-            "ALTER TABLE knowledge_agent_documents ADD COLUMN agent_attempt_json TEXT"
-        )
 
 
 def save_plan(plan: FolderPlan, *, database_path: Path, user_id: Optional[int]) -> None:
@@ -117,8 +112,8 @@ def save_plan(plan: FolderPlan, *, database_path: Path, user_id: Optional[int]) 
         connection.executemany(
             """
             INSERT INTO knowledge_agent_documents
-                (run_id, source_path, source_hash, profile_json, decision_json, agent_attempt_json)
-            VALUES (?, ?, ?, ?, ?, ?)
+                (run_id, source_path, source_hash, profile_json, decision_json)
+            VALUES (?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -127,11 +122,6 @@ def save_plan(plan: FolderPlan, *, database_path: Path, user_id: Optional[int]) 
                     document.profile.source_hash,
                     document.profile.model_dump_json(),
                     document.decision.model_dump_json(),
-                    (
-                        document.agent_attempt.model_dump_json()
-                        if document.agent_attempt is not None
-                        else None
-                    ),
                 )
                 for document in plan.documents
             ],
@@ -260,8 +250,7 @@ def load_planned_documents(
         _ensure_schema(connection)
         rows = connection.execute(
             """
-            SELECT documents.profile_json, documents.decision_json,
-                   documents.agent_attempt_json
+            SELECT documents.profile_json, documents.decision_json
             FROM knowledge_agent_documents AS documents
             JOIN knowledge_agent_runs AS runs ON runs.run_id = documents.run_id
             WHERE documents.run_id = ? AND runs.user_id IS ?
@@ -273,13 +262,8 @@ def load_planned_documents(
         PlannedDocument(
             profile=CorpusProfile.model_validate_json(profile_json),
             decision=StrategyDecision.model_validate_json(decision_json),
-            agent_attempt=(
-                AgentAttempt.model_validate_json(agent_attempt_json)
-                if agent_attempt_json is not None
-                else None
-            ),
         )
-        for profile_json, decision_json, agent_attempt_json in rows
+        for profile_json, decision_json in rows
     )
 
 

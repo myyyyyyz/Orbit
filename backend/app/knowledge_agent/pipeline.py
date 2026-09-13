@@ -1,21 +1,15 @@
 """The non-ingesting Knowledge Agent folder planning pipeline."""
 
 
-from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Protocol, Optional
+from typing import Optional
 from uuid import uuid4
 
-from .evidence import read_evidence
-from .models import AgentAttempt, CorpusProfile, FolderPlan, PlannedDocument
+from .models import CorpusProfile, FolderPlan, PlannedDocument
 from .profiler import scan_folder
 from .repository import save_plan
 from .run_state import initial_status
 from .selector import select_strategy
-
-
-class KnowledgeAgent(Protocol):
-    def recommend(self, profile: CorpusProfile, evidence: str) -> AgentAttempt: ...
 
 
 def _assert_descendant(folder: Path, knowledge_root: Path) -> None:
@@ -31,8 +25,6 @@ def plan_folder(
     knowledge_root: Path,
     database_path: Path,
     user_id: Optional[int] = None,
-    agent_suggestions: Optional[Mapping[str, Mapping[str, Any]]] = None,
-    agent: Optional[KnowledgeAgent] = None,
 ) -> FolderPlan:
     """Profile and select strategies without creating chunks or vectors."""
 
@@ -40,20 +32,12 @@ def plan_folder(
     knowledge_root = knowledge_root.resolve()
     _assert_descendant(folder, knowledge_root)
     profiles = scan_folder(folder)
-    suggestions = agent_suggestions or {}
     documents: list[PlannedDocument] = []
     for profile in profiles:
-        suggestion = suggestions.get(profile.source_path)
-        attempt = None
-        if suggestion is None and agent is not None:
-            evidence = read_evidence(folder / profile.source_path)
-            attempt = agent.recommend(profile, evidence)
-            suggestion = attempt.suggestion if attempt.status == "success" else None
         documents.append(
             PlannedDocument(
                 profile=profile,
-                decision=select_strategy(profile, suggestion),
-                agent_attempt=attempt,
+                decision=select_strategy(profile),
             )
         )
     plan = FolderPlan(

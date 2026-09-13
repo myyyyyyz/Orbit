@@ -7,6 +7,7 @@ import {
   Plus, ChevronDown, ChevronUp, Trash2, Sparkles, Clock, Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ToolPolicyPanel } from "./tool-policy-panel";
 
 // C4: 缓存命中率面板数据结构
 interface CacheStats {
@@ -556,6 +557,9 @@ export function SettingsPanel() {
             </p>
           </div>
         </section>
+
+        {/* 项目工具权限（三态门控配置） */}
+        <ToolPolicyPanel />
 
         {/* P5: Schedule 管理 */}
         <section>

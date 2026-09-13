@@ -5,10 +5,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api import knowledge_plan
-from app.knowledge_agent.adapter import OpenAICompatibleKnowledgeAgent
 from app.knowledge_agent.catalog import STRATEGY_CATALOG
 from app.knowledge_agent.chunk_ids import make_chunk_id
-from app.knowledge_agent.models import AgentAttempt, KnowledgeChunk
+from app.knowledge_agent.models import KnowledgeChunk
 from app.knowledge_agent.evaluation_models import EvaluationReport
 from app.knowledge_agent.releases import ActiveIndexVersion
 from app.knowledge_agent.staging_store import staging_collection_name
@@ -16,31 +15,6 @@ from app.middleware.auth import get_current_user
 
 
 SOURCE_KNOWLEDGE = Path(__file__).resolve().parents[2] / "knowledge"
-
-
-class StaticAgent:
-    def recommend(self, profile, evidence):
-        strategy_by_type = {
-            "markdown": "markdown_hierarchical_v1",
-            "docx": "docx_layout_aware_v1",
-            "xlsx": "spreadsheet_structured_v1",
-            "pdf": (
-                "pdf_ocr_review_v1"
-                if profile.text_extraction_ratio < 0.1
-                else "pdf_text_hierarchical_v1"
-            ),
-        }
-        return AgentAttempt(
-            status="success",
-            model="api-test-model",
-            duration_ms=1,
-            suggestion={
-                "strategy_id": strategy_by_type[profile.file_type],
-                "confidence": 0.9,
-                "reason": "API test suggestion",
-                "requires_review": False,
-            },
-        )
 
 
 class RecordingStagingStore:
@@ -115,8 +89,7 @@ def test_run_list_endpoint_returns_only_current_tenant_runs(tmp_path, monkeypatc
     client = TestClient(app)
     planned = client.post(
         "/api/v1/knowledge/plan-folder",
-        json={"path": "fixtures", "use_agent": False},
-    ).json()
+        json={"path": "fixtures"},    ).json()
 
     response = client.get("/api/v1/knowledge/runs", params={"limit": 20})
 
@@ -146,11 +119,6 @@ def test_plan_folder_endpoint_returns_dry_run_without_vector_writes(tmp_path, mo
     app.include_router(knowledge_plan.router)
     app.dependency_overrides[get_current_user] = lambda: {"user_id": 42}
     monkeypatch.setattr(knowledge_plan, "_database_path", lambda: tmp_path / "audit.sqlite3")
-    monkeypatch.setattr(
-        OpenAICompatibleKnowledgeAgent,
-        "from_env",
-        classmethod(lambda cls: StaticAgent()),
-    )
 
     response = TestClient(app).post("/api/v1/knowledge/plan-folder", json={"path": "fixtures"})
 
@@ -159,33 +127,18 @@ def test_plan_folder_endpoint_returns_dry_run_without_vector_writes(tmp_path, mo
     assert payload["dry_run"] is True
     assert payload["vector_store_writes"] == 0
     assert payload["document_count"] == 7
-    assert all(document["agent_attempt"]["status"] == "success" for document in payload["documents"])
 
 
-def test_plan_folder_endpoint_can_disable_agent(tmp_path, monkeypatch):
-    class ForbiddenAgent:
-        def recommend(self, profile, evidence):
-            raise AssertionError("Agent must not run when use_agent is false")
-
+def test_plan_folder_endpoint_does_not_expose_agent_attempt(tmp_path, monkeypatch):
     app = FastAPI()
     app.include_router(knowledge_plan.router)
     app.dependency_overrides[get_current_user] = lambda: {"user_id": 42}
     monkeypatch.setattr(knowledge_plan, "_database_path", lambda: tmp_path / "audit.sqlite3")
-    monkeypatch.setattr(
-        OpenAICompatibleKnowledgeAgent,
-        "from_env",
-        classmethod(lambda cls: ForbiddenAgent()),
-    )
 
-    response = TestClient(app).post(
-        "/api/v1/knowledge/plan-folder",
-        json={"path": "fixtures", "use_agent": False},
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["vector_store_writes"] == 0
-    assert all(document["agent_attempt"] is None for document in payload["documents"])
+    payload = TestClient(app).post(
+        "/api/v1/knowledge/plan-folder", json={"path": "fixtures"}
+    ).json()
+    assert all("agent_attempt" not in document for document in payload["documents"])
 
 
 def test_run_can_be_read_and_approved_without_vector_writes(tmp_path, monkeypatch):
@@ -199,8 +152,7 @@ def test_run_can_be_read_and_approved_without_vector_writes(tmp_path, monkeypatc
 
     planned = TestClient(app).post(
         "/api/v1/knowledge/plan-folder",
-        json={"path": "fixtures", "use_agent": False},
-    )
+        json={"path": "fixtures"},    )
     run_id = planned.json()["run_id"]
 
     saved = TestClient(app).get(f"/api/v1/knowledge/runs/{run_id}")
@@ -227,8 +179,7 @@ def test_planned_run_detail_restores_documents_for_current_tenant(tmp_path, monk
     client = TestClient(app)
     planned = client.post(
         "/api/v1/knowledge/plan-folder",
-        json={"path": "fixtures", "use_agent": False},
-    ).json()
+        json={"path": "fixtures"},    ).json()
 
     restored = client.get(f"/api/v1/knowledge/runs/{planned['run_id']}/plan")
     current["user_id"] = 99
@@ -250,8 +201,7 @@ def test_approve_endpoint_returns_conflict_after_source_change(tmp_path, monkeyp
     client = TestClient(app)
     planned = client.post(
         "/api/v1/knowledge/plan-folder",
-        json={"path": "fixtures", "use_agent": False},
-    )
+        json={"path": "fixtures"},    )
     run_id = planned.json()["run_id"]
     (knowledge_root / "fixtures" / "clean-policy.md").write_text(
         "changed", encoding="utf-8"
@@ -275,8 +225,7 @@ def test_run_endpoint_hides_other_tenants_runs(tmp_path, monkeypatch):
     client = TestClient(app)
     planned = client.post(
         "/api/v1/knowledge/plan-folder",
-        json={"path": "fixtures", "use_agent": False},
-    )
+        json={"path": "fixtures"},    )
     current["user_id"] = 99
 
     response = client.get(f"/api/v1/knowledge/runs/{planned.json()['run_id']}")
@@ -299,8 +248,7 @@ def test_approved_run_can_execute_to_evaluating(tmp_path, monkeypatch):
     client = TestClient(app)
     planned = client.post(
         "/api/v1/knowledge/plan-folder",
-        json={"path": "fixtures", "use_agent": False},
-    )
+        json={"path": "fixtures"},    )
     run_id = planned.json()["run_id"]
     assert client.post(f"/api/v1/knowledge/runs/{run_id}/approve").status_code == 200
 
@@ -325,8 +273,7 @@ def test_unapproved_run_returns_conflict_without_initializing_chroma(tmp_path, m
     client = TestClient(app)
     planned = client.post(
         "/api/v1/knowledge/plan-folder",
-        json={"path": "fixtures", "use_agent": False},
-    )
+        json={"path": "fixtures"},    )
 
     response = client.post(
         f"/api/v1/knowledge/runs/{planned.json()['run_id']}/execute"

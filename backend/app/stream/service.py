@@ -6,7 +6,7 @@ import urllib.request
 
 from ..config import settings
 from ..logging_config import get_logger
-from ..search import search
+from ..retrieval import plan_retrieval, execute_retrieval_plan
 from ..router import route_model
 from ..cache import get as cache_get, put as cache_put
 from ..llm import (
@@ -58,9 +58,27 @@ def stream_ask(question: str, top_k: int = None, user_id: int = None, api_key: s
 
     yield _sse("status", {"stage": "cache_miss"})
 
-    # ── Event 3: 检索（含相关度过滤）──
-    yield _sse("status", {"stage": "retrieving", "top_k": top_k})
-    chunks = [c for c in search(question, top_k, user_id) if c["score"] >= MIN_RELEVANCE_SCORE]
+    # ── Event 3: 检索规划 + 检索（查询期自适应 RAG 调度）──
+    # planner 在缓存未命中后才跑；无 API key / 调用失败 → 确定性默认计划。
+    plan = plan_retrieval(question, user_id=user_id, api_key=api_key)
+    yield _sse("status", {
+        "stage": "planned",
+        "retrieve": plan.retrieve,
+        "strategy": plan.strategy,
+        "rewritten": bool(plan.rewritten_query),
+        "subquestions": len(plan.subquestions),
+        "top_k": plan.top_k,
+        "threshold": plan.threshold,
+        "use_tools": plan.use_tools,
+    })
+
+    if not plan.retrieve:
+        # 常识/无关问题：跳过检索，直接进入纯对话生成
+        chunks = []
+        yield _sse("status", {"stage": "retrieval_skipped", "reason": "planner: no retrieval needed"})
+    else:
+        yield _sse("status", {"stage": "retrieving", "top_k": plan.top_k})
+        chunks = execute_retrieval_plan(question, user_id=user_id, plan=plan, api_key=api_key)
 
     yield _sse("status", {
         "stage": "retrieved",

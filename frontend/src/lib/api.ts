@@ -212,7 +212,7 @@ export interface LoopGroup {
 
 interface LoopCallbacks {
   onEvent?: (ev: LoopEvent) => void;
-  onCheckpoint?: (title: string, options: string[]) => void;
+  onCheckpoint?: (title: string, options: string[], payload?: Record<string, unknown>) => void;
   onDone?: () => void;
   onError?: (message: string) => void;
 }
@@ -271,6 +271,21 @@ export const agents = {
 
   getPauseAll: () => request<{ key: string; value: boolean }>(`${V1}/agents/loop/pause-all`),
   setPauseAll: (paused: boolean) => request<{ key: string; value: boolean }>(`${V1}/agents/loop/pause-all`, { method: "POST", body: JSON.stringify({ paused }) }),
+
+  // 项目工具权限（三态门控）：自动执行清单 / 需人工同意清单
+  getToolPolicy: (projectDir = "") =>
+    request<{
+      project_dir: string;
+      auto_commands: string[];
+      approval_commands: string[];
+      default_auto_commands: string[];
+      is_default: boolean;
+    }>(`${V1}/agents/tool-policy${projectDir ? `?project_dir=${encodeURIComponent(projectDir)}` : ""}`),
+  setToolPolicy: (body: { project_dir: string; auto_commands: string[]; approval_commands: string[] }) =>
+    request<{ status: string; project_dir: string; auto_commands: string[]; approval_commands: string[] }>(
+      `${V1}/agents/tool-policy`,
+      { method: "PUT", body: JSON.stringify(body) }
+    ),
 
   scanMemory: (root?: string) =>
     request<{
@@ -347,7 +362,7 @@ export const agents = {
           if (currentEvent === "checkpoint") {
             const title = (data.payload.title as string) || "等待你的决策";
             const options = (data.payload.options as string[]) || ["continue"];
-            cb.onCheckpoint?.(title, options);
+            cb.onCheckpoint?.(title, options, data.payload);
           }
           if (currentEvent === "done") {
             cb.onDone?.();

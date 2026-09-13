@@ -333,18 +333,103 @@ _VERIFY_BLOCKED_BINS = {
 _VERIFY_TIMEOUT = 30          # 单命令超时（秒）
 _VERIFY_OUTPUT_MAX = 4000     # 输出截断（字符）
 
+# 命令三态判定结果
+_DECISION_ALLOW = "allow"        # 自动执行（命中自动执行清单）
+_DECISION_APPROVAL = "approval"  # 需人工同意（写死名单 / 非安全程序 / 清单外）
 
-def _run_verification(commands: list[str], project_dir: str) -> list[dict]:
-    """安全执行 Builder 的验证命令，返回逐条结果 [{command, ok, output, error}]。
+
+def _load_tool_policy(user_id: Optional[int], project_dir: str, gate: "LoopGate") -> dict:
+    """加载项目级工具策略；无记录时回退默认。
+
+    默认：auto_commands = gate.yaml 的 allowed_commands；approval_commands = []。
+    用户一旦在前端保存过策略，则以该记录为准（auto_commands 可为空 = 全部需人工同意）。
+    """
+    gate.load()
+    default = {"auto_commands": list(gate.allowed_commands or []), "approval_commands": []}
+    if not user_id:
+        return default
+    try:
+        rec = db.get_tool_policy(user_id, project_dir)
+    except Exception as e:  # DB 不可用不应阻断 loop
+        logger.warning("读取项目工具策略失败，使用默认: %s", e)
+        return default
+    if not rec or not rec.get("policy_json"):
+        return default
+    pol = rec["policy_json"] or {}
+    auto = pol.get("auto_commands", default["auto_commands"])
+    approval = pol.get("approval_commands", [])
+    return {
+        "auto_commands": [str(x) for x in (auto or []) if str(x).strip()],
+        "approval_commands": [str(x) for x in (approval or []) if str(x).strip()],
+    }
+
+
+def _classify_command(raw: str, policy: dict) -> dict:
+    """把单条验证命令判为 allow（自动执行）或 approval（需人工同意）。
+
+    判定顺序（approval 优先，保证「降级」总能盖过「自动」）：
+    1. 命中用户 approval_commands（前缀）→ approval（显式降级，最高优先）
+    2. 二进制在写死禁止名单 _VERIFY_BLOCKED_BINS → approval（不自动，可人工同意）
+    3. 二进制不在安全程序名单 _VERIFY_ALLOWED_BINS → approval（非安全程序）
+    4. 命中 auto_commands（前缀；默认即 gate.yaml allowed_commands）→ allow
+    5. 其余 → approval（默认需人工同意）
+
+    注：文件 denylist 仍是硬拒（见 check_build），不在此函数内处理。
+    """
+    cmd = (raw or "").strip()
+    if not cmd:
+        return {"command": raw, "decision": _DECISION_ALLOW, "reason": ""}
+    auto = policy.get("auto_commands") or []
+    approval = policy.get("approval_commands") or []
+    # 1. 用户显式标记「需人工同意」（降级优先）
+    for pat in approval:
+        if pat and cmd.startswith(pat):
+            return {"command": raw, "decision": _DECISION_APPROVAL, "reason": f"在项目「需人工同意」清单内（{pat}）"}
+    try:
+        argv = shlex.split(cmd)
+    except ValueError:
+        return {"command": raw, "decision": _DECISION_APPROVAL, "reason": "命令无法解析，需人工确认"}
+    if not argv:
+        return {"command": raw, "decision": _DECISION_ALLOW, "reason": ""}
+    bin_name = os.path.basename(argv[0])
+    # 2. 写死禁止名单（危险命令）：不自动执行，但允许人工同意
+    if bin_name in _VERIFY_BLOCKED_BINS:
+        return {"command": raw, "decision": _DECISION_APPROVAL, "reason": f"{bin_name} 属写死禁止名单，需人工同意"}
+    # 3. 非安全程序
+    if bin_name not in _VERIFY_ALLOWED_BINS:
+        return {"command": raw, "decision": _DECISION_APPROVAL, "reason": f"{bin_name} 非安全程序，需人工同意"}
+    # 4. 自动执行清单（policy.auto_commands 默认即 gate.yaml allowed_commands）
+    for pat in auto:
+        if pat and cmd.startswith(pat):
+            return {"command": raw, "decision": _DECISION_ALLOW, "reason": f"在自动执行清单内（{pat}）"}
+    # 5. 默认需人工同意
+    return {"command": raw, "decision": _DECISION_APPROVAL, "reason": "不在自动执行清单内，默认需人工同意"}
+
+
+def _classify_commands(commands: list[str], policy: dict) -> list[dict]:
+    """批量分类验证命令，返回 [{command, decision, reason}]。"""
+    return [_classify_command(c, policy) for c in (commands or [])]
+
+
+def _run_verification(commands: list[str], project_dir: str, gate: "LoopGate" = None,
+                      approved: Optional[set] = None) -> list[dict]:
+    """安全执行验证命令，返回逐条结果 [{command, ok, output, error}]。
 
     安全设计（安全规则 #2 RCE）：
     - 不经过 shell（shlex.split 直接 exec，禁用 shell=True 杜绝管道/重定向注入）
-    - 二进制白名单 + 黑名单双校验
+    - 命令三态判定（见 _classify_command）：allow 自动执行 / approval 需人工同意
     - 仅在已校验的 project_dir 内执行
     - 单命令超时 + 输出截断
+
+    approved：已由用户人工同意的命令集合。这些命令跳过黑白名单判定直接执行
+    （结构性防护 shell=False / cwd 限制 / 超时 仍然生效），使「需人工同意」的
+    写死名单/非安全程序命令得以执行。
     """
+    approved = approved or set()
     if not commands:
         return []
+    if gate is not None:
+        gate.load()  # 幂等：已加载则直接返回
     target = _resolve_safe_project_dir(project_dir)
     if not target:
         return [{"command": c, "ok": False, "output": "", "error": "project_dir 未配置或越界，拒绝执行"} for c in commands]
@@ -363,9 +448,20 @@ def _run_verification(commands: list[str], project_dir: str) -> list[dict]:
         if not argv:
             continue
         bin_name = os.path.basename(argv[0])
-        if bin_name in _VERIFY_BLOCKED_BINS or bin_name not in _VERIFY_ALLOWED_BINS:
-            results.append({"command": raw, "ok": False, "output": "", "error": f"命令 {bin_name} 不在白名单内，拒绝执行"})
-            continue
+        # 已人工同意的命令：跳过黑白名单判定直接执行（结构性防护仍生效）
+        if raw not in approved:
+            # 关 1：二进制禁止名单（写死危险命令）
+            if bin_name in _VERIFY_BLOCKED_BINS:
+                results.append({"command": raw, "ok": False, "output": "", "error": f"命令 {bin_name} 在禁止名单内，且未获人工同意，拒绝执行"})
+                continue
+            # 关 2：二进制允许名单（安全程序白名单）
+            if bin_name not in _VERIFY_ALLOWED_BINS:
+                results.append({"command": raw, "ok": False, "output": "", "error": f"命令 {bin_name} 不在安全程序白名单内，且未获人工同意，拒绝执行"})
+                continue
+            # 关 3：项目级命令白名单（gate.yaml:allowed_commands，前缀匹配）；配置非空时收窄
+            if gate and gate.allowed_commands and not gate.check_command(raw):
+                results.append({"command": raw, "ok": False, "output": "", "error": "命令未通过 gate.yaml allowed_commands 白名单，且未获人工同意，拒绝执行"})
+                continue
 
         try:
             proc = subprocess.run(
@@ -652,6 +748,45 @@ def _apply_build(build: BuildOutput, project_dir: str) -> dict:
     }
 
 
+# ── 验证命令人工审批 ──────────────────────────────────────────────
+
+async def _execute_verification_with_approval(
+    loop_id: int, commands: list[str], project_dir: str,
+    gate: "LoopGate", policy: dict,
+) -> list[dict]:
+    """命令三态执行：allow 自动跑；approval 需用户 checkpoint 同意后才跑。
+
+    - allow 命令：直接执行
+    - approval 命令：emit tool_approval checkpoint 暂停等用户决策
+      - approve → 连同 allow 命令一起执行
+      - reject  → 跳过，并补充 skipped 证据
+    """
+    verdicts = _classify_commands(commands, policy)
+    allow_cmds = [v["command"] for v in verdicts if v["decision"] == _DECISION_ALLOW]
+    approval_items = [v for v in verdicts
+                      if v["decision"] == _DECISION_APPROVAL and (v["command"] or "").strip()]
+    approved: set = set()
+    if approval_items:
+        payload_cmds = [{"command": v["command"], "reason": v["reason"]} for v in approval_items]
+        await _emit(loop_id, "system", "tool_approval_requested", {"commands": payload_cmds}, notify=True)
+        decision = await _wait_decision(loop_id, "以下命令需要你确认后才能执行", {
+            "kind": "tool_approval",
+            "options": ["approve", "reject"],
+            "commands": payload_cmds,
+        })
+        if (decision or {}).get("decision") == "approve":
+            approved = {v["command"] for v in approval_items}
+    exec_cmds = allow_cmds + [v["command"] for v in approval_items if v["command"] in approved]
+    results = _run_verification(exec_cmds, project_dir, gate, approved)
+    for v in approval_items:
+        if v["command"] not in approved:
+            results.append({
+                "command": v["command"], "ok": False, "output": "",
+                "error": "需人工审批：用户未同意执行，已跳过",
+            })
+    return results
+
+
 # ── Checkpoint ───────────────────────────────────────────────────
 
 async def _wait_decision(loop_id: int, title: str, payload: dict) -> dict:
@@ -709,6 +844,9 @@ async def run_loop(
     # P0-1: 加载安全门控
     gate = LoopGate(project_dir)
     gate.load()
+
+    # 加载项目级工具策略（前端可配：自动执行清单 / 需人工同意清单）
+    tool_policy = _load_tool_policy(user_id, project_dir, gate)
 
     # P1-3: 加载用户约束
     constraints_text = _load_constraints(project_dir)
@@ -981,7 +1119,9 @@ async def run_loop(
         apply_result = _apply_build(build, worktree_path)
         last_effects = apply_result.get("effects", [])
         # P4: 执行 Builder 的验证命令，产出 Reviewer 证据
-        verify_results = _run_verification(build.verification_commands, worktree_path)
+        verify_results = await _execute_verification_with_approval(
+            loop_id, build.verification_commands, worktree_path, gate, tool_policy
+        )
         # P3: 测试分层校验（test_level → 验证充分性证据）
         verify_gate = gate.check_verification(build.verification_commands, _max_test_level(plan))
         await _emit(loop_id, "builder", "builder_done", {
@@ -1092,7 +1232,9 @@ async def run_loop(
             apply_result = _apply_build(build, worktree_path)
             last_effects = apply_result.get("effects", [])
             # P4: 退回重试后同样执行验证命令
-            verify_results = _run_verification(build.verification_commands, worktree_path)
+            verify_results = await _execute_verification_with_approval(
+                loop_id, build.verification_commands, worktree_path, gate, tool_policy
+            )
             # P3: 退回重试后同样做测试分层校验
             verify_gate = gate.check_verification(build.verification_commands, _max_test_level(plan))
             await _emit(loop_id, "builder", "builder_done", {

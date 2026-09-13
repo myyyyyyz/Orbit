@@ -123,6 +123,18 @@ def init_loop_db():
         );
         CREATE INDEX IF NOT EXISTS idx_run_logs_project ON run_logs(user_id, project_name);
         CREATE INDEX IF NOT EXISTS idx_run_logs_started ON run_logs(started_at);
+
+        -- 项目级工具策略：前端可配置「自动执行清单」与「需人工同意清单」
+        -- policy_json = {"auto_commands": [...], "approval_commands": [...]}
+        CREATE TABLE IF NOT EXISTS project_tool_policies (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            project_dir TEXT NOT NULL,
+            policy_json TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now')),
+            UNIQUE(user_id, project_dir)
+        );
     """)
     conn.commit()
     conn.close()
@@ -285,6 +297,61 @@ def upsert_project_state(user_id: int, project_name: str, project_dir: str, stat
             conn.execute(
                 "INSERT INTO project_states (user_id, project_name, project_dir, state_json) VALUES (?, ?, ?, ?)",
                 (user_id, project_name, project_dir, state_json),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ── Project tool policy helpers ─────────────────────────────────
+
+def get_tool_policy(user_id: int, project_dir: str) -> Optional[dict]:
+    """读取项目级工具策略。
+
+    返回 {"auto_commands": [...], "approval_commands": [...]} 或 None（无记录 → 调用方回退默认）。
+    """
+    init_loop_db()
+    conn = _get_db()
+    try:
+        row = conn.execute(
+            "SELECT * FROM project_tool_policies WHERE user_id = ? AND project_dir = ?",
+            (int(user_id or 0), project_dir or ""),
+        ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        try:
+            d["policy_json"] = json.loads(d["policy_json"]) if d["policy_json"] else {}
+        except json.JSONDecodeError:
+            d["policy_json"] = {}
+        return d
+    finally:
+        conn.close()
+
+
+def upsert_tool_policy(user_id: int, project_dir: str, policy: dict):
+    """写入/更新项目级工具策略（按 user_id + project_dir 唯一）。"""
+    init_loop_db()
+    conn = _get_db()
+    try:
+        now = datetime.now().isoformat()
+        uid = int(user_id or 0)
+        pdir = project_dir or ""
+        policy_json = json.dumps(policy, ensure_ascii=False)
+        exists = conn.execute(
+            "SELECT 1 FROM project_tool_policies WHERE user_id = ? AND project_dir = ?",
+            (uid, pdir),
+        ).fetchone()
+        if exists:
+            conn.execute(
+                "UPDATE project_tool_policies SET policy_json = ?, updated_at = ? "
+                "WHERE user_id = ? AND project_dir = ?",
+                (policy_json, now, uid, pdir),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO project_tool_policies (user_id, project_dir, policy_json) VALUES (?, ?, ?)",
+                (uid, pdir, policy_json),
             )
         conn.commit()
     finally:

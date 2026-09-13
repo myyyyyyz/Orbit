@@ -39,8 +39,7 @@ def test_import_api_freezes_folder_then_reuses_existing_planner(tmp_path, monkey
     completed = client.post(f"/api/v1/knowledge/imports/{import_id}/complete")
     planned = client.post(
         "/api/v1/knowledge/plan-folder",
-        json={"path": completed.json()["relative_path"], "use_agent": False},
-    )
+        json={"path": completed.json()["relative_path"]},    )
 
     assert created.status_code == 201
     assert uploaded.status_code == 200

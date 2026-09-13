@@ -28,53 +28,9 @@ def test_scanned_pdf_is_routed_to_ocr_review_fallback():
     assert decision.requires_review is True
 
 
-def test_incompatible_agent_strategy_falls_back_to_safe_pdf_strategy():
-    decision = select_strategy(
-        make_profile(),
-        {"strategy_id": "spreadsheet_structured_v1", "confidence": 0.98, "reason": "wrong type"},
-    )
+def test_unknown_file_type_falls_back_to_markdown_strategy():
+    decision = select_strategy(make_profile(file_type="unknown"))
 
-    assert decision.strategy_id == "pdf_text_hierarchical_v1"
+    assert decision.strategy_id == "markdown_hierarchical_v1"
     assert decision.decision_source == "fallback"
-
-
-def test_valid_compatible_agent_strategy_is_accepted():
-    decision = select_strategy(
-        make_profile(),
-        {
-            "strategy_id": "pdf_text_hierarchical_v1",
-            "confidence": 0.88,
-            "reason": "text extraction is reliable",
-        },
-    )
-
-    assert decision.decision_source == "agent"
-    assert decision.confidence == 0.88
-
-
-def test_agent_can_escalate_review_for_messy_spreadsheet():
-    decision = select_strategy(
-        make_profile(file_type="xlsx"),
-        {
-            "strategy_id": "spreadsheet_structured_v1",
-            "confidence": 0.9,
-            "reason": "结构混乱，需要抽查",
-            "requires_review": True,
-        },
-    )
-
-    assert decision.requires_review is True
-
-
-def test_agent_cannot_suppress_catalog_required_review():
-    decision = select_strategy(
-        make_profile(text_extraction_ratio=0.01),
-        {
-            "strategy_id": "pdf_ocr_review_v1",
-            "confidence": 0.9,
-            "reason": "扫描件需要 OCR",
-            "requires_review": False,
-        },
-    )
-
-    assert decision.requires_review is True
+    assert decision.requires_review is False

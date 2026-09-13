@@ -201,6 +201,66 @@ async def api_loop_decision(
     return {"status": "ok", "decision": decision, "message": "决策已记录"}
 
 
+@router.get("/tool-policy")
+def api_get_tool_policy(
+    project_dir: str = "",
+    current_user: Optional[dict] = Depends(get_optional_user),
+):
+    """读取项目级工具策略（含默认值）。
+
+    返回 auto_commands（自动执行）/ approval_commands（需人工同意）
+    / default_auto_commands（gate.yaml 默认）/ is_default（是否尚未自定义）。
+    """
+    from .gate import LoopGate
+
+    user_id = current_user["user_id"] if current_user else None
+    gate = LoopGate(project_dir)
+    gate.load()
+    default_auto = list(gate.allowed_commands or [])
+
+    rec = db.get_tool_policy(user_id, project_dir) if user_id else None
+    if rec and rec.get("policy_json"):
+        pol = rec["policy_json"] or {}
+        auto = pol.get("auto_commands", default_auto)
+        approval = pol.get("approval_commands", [])
+        is_default = False
+    else:
+        auto, approval, is_default = default_auto, [], True
+
+    return {
+        "project_dir": project_dir,
+        "auto_commands": auto or [],
+        "approval_commands": approval or [],
+        "default_auto_commands": default_auto,
+        "is_default": is_default,
+    }
+
+
+@router.put("/tool-policy")
+def api_set_tool_policy(
+    body: dict = Body(...),
+    current_user: Optional[dict] = Depends(get_optional_user),
+):
+    """写入项目级工具策略（按当前用户 + 项目目录）。
+
+    body: {project_dir, auto_commands: [...], approval_commands: [...]}
+    """
+    if not current_user:
+        raise HTTPException(401, "需要登录后才能配置项目工具策略")
+    user_id = current_user["user_id"]
+    project_dir = (body.get("project_dir") or "").strip()
+    auto = body.get("auto_commands") or []
+    approval = body.get("approval_commands") or []
+    if not isinstance(auto, list) or not isinstance(approval, list):
+        raise HTTPException(400, "auto_commands / approval_commands 必须是数组字符串")
+    policy = {
+        "auto_commands": [str(x).strip() for x in auto if str(x).strip()],
+        "approval_commands": [str(x).strip() for x in approval if str(x).strip()],
+    }
+    db.upsert_tool_policy(user_id, project_dir, policy)
+    return {"status": "ok", "project_dir": project_dir, **policy}
+
+
 @router.get("/loops")
 def api_list_loops(current_user: Optional[dict] = Depends(get_optional_user)):
     """当前用户的 loop 列表（schedule 触发后可据此查看）。"""

@@ -13,7 +13,7 @@ interface LoopViewState {
   loopId: number;
   task: string;
   steps: AgentStep[];
-  checkpoint: { title: string; options: string[] } | null;
+  checkpoint: { title: string; options: string[]; kind?: string; commands?: { command: string; reason: string }[] } | null;
   finished: boolean;
   outcome: "done" | "failed" | null;   // Bug #12: 区分"完成/失败"（避免 failed 显示"已完成"）
   failInfo: { verdict: string; fail_reason: string; fix_direction: string } | null;
@@ -250,9 +250,12 @@ export function ChatInterface() {
             };
           });
         },
-        onCheckpoint: (title, options) => {
+        onCheckpoint: (title, options, payload) => {
+          const cmds = Array.isArray(payload?.commands)
+            ? (payload?.commands as { command: string; reason: string }[])
+            : undefined;
           setLoopView((prev) => prev && prev.loopId === loop_id
-            ? { ...prev, checkpoint: { title, options } }
+            ? { ...prev, checkpoint: { title, options, kind: payload?.kind as string | undefined, commands: cmds } }
             : prev);
         },
         onDone: () => {
