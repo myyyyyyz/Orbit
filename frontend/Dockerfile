@@ -8,7 +8,12 @@ WORKDIR /app
 
 # 依赖层缓存：仅 package 变化时才重装
 COPY package.json package-lock.json* ./
-RUN npm ci
+
+# 构建加速（可选）：国内环境传 --build-arg NPM_REGISTRY=...；
+# 默认走官方源，CI 与海外构建行为完全不变。
+ARG NPM_REGISTRY=""
+RUN npm config set registry "${NPM_REGISTRY:-https://registry.npmjs.org}" \
+    && npm ci
 
 # NEXT_PUBLIC_* 在构建时内联进产物，必须在 build 前注入
 # 该地址由浏览器直接访问，需填宿主机可达地址（非容器内主机名）

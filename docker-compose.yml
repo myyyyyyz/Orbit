@@ -10,6 +10,11 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        # 国内构建加速（可选）：在 .env 中设置 USE_CN_MIRRORS 相关项后生效，
+        # 留空则走官方源，行为与原先一致。
+        DEBIAN_MIRROR: ${DEBIAN_MIRROR:-}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}
     image: orbit-backend:latest
     container_name: orbit-backend
     ports:
@@ -69,6 +74,8 @@ services:
       args:
         # 构建期注入：Next.js 的 NEXT_PUBLIC_* 在打包时内联
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8001}
+        # 国内构建加速（可选）：留空则走官方源
+        NPM_REGISTRY: ${NPM_REGISTRY:-}
     image: orbit-frontend:latest
     container_name: orbit-frontend
     ports:

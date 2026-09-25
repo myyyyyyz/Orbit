@@ -14,14 +14,23 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+# 构建加速（可选）：国内环境通过 --build-arg 指定镜像源；
+# 默认留空 → 走官方源，CI 与海外构建行为完全不变。
+ARG DEBIAN_MIRROR=""
+ARG PIP_INDEX_URL=""
+
 # 构建依赖单独一层，装完即清理，避免残留在镜像中
-RUN apt-get update \
+RUN if [ -n "$DEBIAN_MIRROR" ]; then \
+        sed -i "s|deb.debian.org|$DEBIAN_MIRROR|g" /etc/apt/sources.list.d/debian.sources; \
+    fi \
+    && apt-get update \
     && apt-get install -y --no-install-recommends build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # 依赖层缓存：仅 requirements 变化时才重装
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# ${PIP_INDEX_URL:+-i} 在该变量为空时不产生任何参数，保持默认行为
+RUN pip install --no-cache-dir ${PIP_INDEX_URL:+-i} ${PIP_INDEX_URL} -r requirements.txt
 
 COPY . .
 
