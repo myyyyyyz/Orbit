@@ -2,21 +2,14 @@ from .models import CorpusProfile, StrategyDecision
 
 
 def _fallback(profile: CorpusProfile) -> StrategyDecision:
-    if profile.file_type == "pdf" and profile.text_extraction_ratio < 0.1:
-        return StrategyDecision(
-            strategy_id="pdf_ocr_review_v1",
-            decision_source="fallback",
-            confidence=0.95,
-            reason="PDF 文本提取率过低，按扫描件进入 OCR 与人工复核路径。",
-            requires_review=True,
-        )
-
     strategy_by_type = {
         "markdown": "markdown_hierarchical_v1",
         "text": "markdown_hierarchical_v1",
         "docx": "docx_layout_aware_v1",
         "xlsx": "spreadsheet_structured_v1",
-        "pdf": "pdf_text_hierarchical_v1",
+        # pdf_vision_v1 自带页内图片检测/复杂度分流（OCR 或视觉 LLM）
+        # 与按标题分章，扫描件（文本提取率低）同样走此策略。
+        "pdf": "pdf_vision_v1",
     }
     strategy_id = strategy_by_type.get(profile.file_type, "markdown_hierarchical_v1")
     return StrategyDecision(

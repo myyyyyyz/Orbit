@@ -19,7 +19,9 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from ..config import DATA_DIR
-from ..middleware.auth import get_optional_user
+from ..logging_config import get_logger
+from ..middleware.auth import get_optional_user, require_role
+from ..rate_limit import limiter
 from ..stream.sse import _sse
 from . import db
 from .budget import DEFAULT_LOOP_TOKEN_BUDGET, set_loop_budget, get_pause_all, set_pause_all
@@ -27,6 +29,8 @@ from .orchestrator import run_loop, get_runtime
 from .schedule import compute_next_run, validate_cron
 from .schemas import LoopScheduleIn, LoopScheduleOut, GlobalSwitchOut, MetricsSummary, GraduationStatus
 from .state import load_project_state, get_graduation_status, save_project_state
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/agents", tags=["agents"])
 
@@ -42,6 +46,7 @@ def _check_loop_access(loop: Optional[dict], current_user: Optional[dict]):
 
 
 @router.post("/loop")
+@limiter.limit("10/minute")
 async def api_start_loop(
     body: dict = Body(...),
     request: Request = None,
@@ -108,9 +113,22 @@ def api_get_pause_all():
 
 
 @router.post("/loop/pause-all")
-async def api_set_pause_all(body: dict = Body(...)):
+async def api_set_pause_all(
+    body: dict = Body(...),
+    admin: dict = Depends(require_role("admin")),
+):
+    """全局急停开关 —— 影响**所有**用户的 loop，属管理操作，仅 admin 可调。
+
+    历史缺陷：只有认证没有授权，任何注册用户都能一键停掉全站 Agent Loop。
+    """
     value = bool(body.get("paused", False))
     set_pause_all(value)
+    logger.warning(
+        "global_kill_switch_changed",
+        paused=value,
+        by=admin.get("username"),
+        user_id=admin.get("user_id"),
+    )
     return GlobalSwitchOut(key="loop-pause-all", value=value)
 
 

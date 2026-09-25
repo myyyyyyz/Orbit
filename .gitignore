@@ -53,3 +53,6 @@ nohup.out
 # Node (for ponytail skill)
 node_modules/
 test-output/
+
+# WorkBuddy 本地项目数据（工作记录/应用清单，仅本地）
+.workbuddy/

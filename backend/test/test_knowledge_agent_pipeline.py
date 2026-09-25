@@ -18,7 +18,7 @@ def test_plan_folder_persists_audit_without_vector_store_writes(tmp_path):
     assert plan.run_id
     assert database_path.exists()
     assert {document.decision.strategy_id for document in plan.documents} >= {
-        "pdf_ocr_review_v1",
+        "pdf_vision_v1",
         "spreadsheet_structured_v1",
     }
 
@@ -35,13 +35,13 @@ def test_plan_folder_rejects_a_folder_outside_knowledge_root(tmp_path):
         raise AssertionError("Expected path traversal protection")
 
 
-def test_requires_review_strategy_drives_run_status(tmp_path):
+def test_pdf_no_longer_requires_review(tmp_path):
     database_path = tmp_path / "audit.sqlite3"
     plan = plan_folder(FIXTURES, knowledge_root=FIXTURES.parent, database_path=database_path, user_id=7)
 
-    # fixtures include a scanned PDF routed to pdf_ocr_review_v1 -> review_required
-    assert any(document.decision.requires_review for document in plan.documents)
-    assert plan.status == "review_required"
+    # pdf_vision_v1 自带图片检测/OCR/视觉 LLM，不再走人工复核闸门
+    assert not any(document.decision.requires_review for document in plan.documents)
+    assert plan.status == "planned"
     with sqlite3.connect(database_path) as connection:
         saved = connection.execute(
             "SELECT COUNT(*) FROM knowledge_agent_documents"

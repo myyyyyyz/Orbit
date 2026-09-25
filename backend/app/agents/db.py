@@ -486,6 +486,38 @@ def update_schedule(schedule_id: int, **fields):
         conn.close()
 
 
+def claim_schedule(schedule_id: int, expected_next_run: Optional[str],
+                   new_next_run: Optional[str], now: Optional[str] = None) -> bool:
+    """原子抢占一次 schedule 触发（CAS on next_run_at）。
+
+    多副本部署时每个副本都有自己的调度器；通过
+    `WHERE id = ? AND next_run_at = <读到的旧值>` 的条件更新，
+    只有一个副本能拿到 rowcount=1，其余副本放弃，从而保证同一次到期只触发一次。
+
+    返回 True 表示本进程获得本次触发权。
+    """
+    now = now or datetime.now().isoformat()
+    init_loop_db()
+    conn = _get_db()
+    try:
+        if expected_next_run is None:
+            cur = conn.execute(
+                "UPDATE loop_schedules SET last_run_at = ?, next_run_at = ?, updated_at = ? "
+                "WHERE id = ? AND enabled = 1 AND next_run_at IS NULL",
+                (now, new_next_run, now, schedule_id),
+            )
+        else:
+            cur = conn.execute(
+                "UPDATE loop_schedules SET last_run_at = ?, next_run_at = ?, updated_at = ? "
+                "WHERE id = ? AND enabled = 1 AND next_run_at = ?",
+                (now, new_next_run, now, schedule_id, expected_next_run),
+            )
+        conn.commit()
+        return cur.rowcount == 1
+    finally:
+        conn.close()
+
+
 def delete_schedule(schedule_id: int) -> bool:
     init_loop_db()
     conn = _get_db()

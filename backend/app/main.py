@@ -3,19 +3,22 @@
 路由按域拆分在 api/ 目录下，此处只做应用初始化和注册。
 """
 
+import asyncio
 import os
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
+from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
-from .config import settings
+from .config import settings, ConfigError
 from .logging_config import setup_logging, get_logger
 from .middleware.request_id import RequestIDMiddleware
-from .middleware.error_handler import global_exception_handler
+from .middleware.error_handler import register_exception_handlers
+from .middleware.security_headers import SecurityHeadersMiddleware
+from .rate_limit import limiter
 from .embed import preload_model
 from .multitenant import init_db as init_tenant_db
 from .memory import init_memory_db
@@ -42,12 +45,12 @@ logger = get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用生命周期：启动时初始化 DB + 预热 Embedding 模型"""
+    """应用生命周期：启动时初始化 DB + 预热 Embedding 模型；退出时优雅停机。"""
     # P0-1: 初始化结构化日志（必须最先执行）
     setup_logging()
 
     # P1-3: 启动时配置验证（仅在非测试环境执行）
-    # conftest.py 设置了 SECRET_KEY 和临时目录，跳过生产级校验
+    # 生产环境配置错误直接抛 ConfigError 阻止启动，不留半配置状态对外服务
     if not os.getenv("PYTEST_RUNNING"):
         from .config import _validate_config_on_startup
         _validate_config_on_startup()
@@ -60,23 +63,39 @@ async def lifespan(app: FastAPI):
         logger.info("databases_initialized")
     except Exception:
         logger.error("database_init_failed", exc_info=True)
+        # 数据库不可用属于致命错误：带着坏掉的 DB 启动只会让所有请求 500
+        if not os.getenv("PYTEST_RUNNING"):
+            raise
+
     try:
-        preload_model()
+        # 模型加载是同步阻塞且耗时的（首次可能数十秒），不能占住事件循环
+        await asyncio.to_thread(preload_model)
         logger.info("embedding_model_preloaded")
     except Exception:
         logger.warning("embedding_preload_failed", exc_info=True)
 
     # P5: 启动 schedule 调度器（每分钟检查一次到期 schedule）
+    started_scheduler = False
     try:
         from .agents.api import trigger_schedule
         from .agents.schedule import start_scheduler
         start_scheduler(trigger_schedule)
+        started_scheduler = True
         logger.info("schedule_scheduler_started")
     except Exception:
         logger.warning("schedule_scheduler_startup_failed", exc_info=True)
 
     yield
+
+    # ── 优雅停机 ──
     logger.info("knowledge_base_shutting_down")
+    if started_scheduler:
+        try:
+            from .agents.schedule import stop_scheduler
+            stop_scheduler()
+            logger.info("schedule_scheduler_stopped")
+        except Exception:
+            logger.warning("schedule_scheduler_stop_failed", exc_info=True)
 
 
 app = FastAPI(
@@ -92,18 +111,21 @@ setup_prometheus(app)
 # P2-2: Sentry 错误追踪（自动，需要 SENTRY_DSN 环境变量）
 setup_sentry()
 
-# Rate Limiter
-limiter = Limiter(key_func=get_remote_address)
+# Rate Limiter —— 全进程唯一实例（详见 app/rate_limit.py）
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # X-Request-ID — 全链路请求追踪
 app.add_middleware(RequestIDMiddleware)
 
-# P0-2: 全局异常处理（在 CORS 之前注册，确保跨域错误也被捕获）
-app.add_exception_handler(Exception, global_exception_handler)
+# P0-2: 全局异常处理 —— 必须同时注册 HTTPException / RequestValidationError /
+# Exception 三类 handler，否则业务错误会绕过统一结构、丢失 request_id。
+register_exception_handlers(app)
 
-# CORS
+# 安全响应头（纯 ASGI 实现，不影响 SSE）
+app.add_middleware(SecurityHeadersMiddleware)
+
+# CORS（最后添加 = 最外层，保证异常响应也带上 CORS 头）
 _CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:8000")
 app.add_middleware(
     CORSMiddleware,
@@ -116,6 +138,7 @@ app.add_middleware(
         "Content-Type", "Authorization", "X-API-Key", "X-LLM-Model", "X-Request-ID",
         "X-LLM-Model-Planner", "X-LLM-Model-Builder", "X-LLM-Model-Reviewer", "X-LLM-Model-User",
     ],
+    expose_headers=["X-Request-ID"],
 )
 
 # 注册路由
@@ -134,22 +157,23 @@ app.include_router(agents_router)
 
 
 # ── 健康检查 ──
+#
+# 三个端点职责不同，混用会导致"要么无意义地恒 200，要么把降级态误判为不可用"：
+#   /health        存活探针（liveness）——进程能响应即 200，供容器 healthcheck 使用
+#   /health/detail 依赖明细——永远 200，body 给出各依赖状态，供运维面板展示
+#   /ready         就绪探针（readiness）——关键依赖不可用时返回 503，供负载均衡摘除节点
 
-@app.get("/health")
-def health(request: Request):
-    """深度健康检查：验证 ChromaDB、SQLite、LLM API 连通性"""
-    log = get_logger(__name__).bind(request_id=getattr(request.state, "request_id", "unknown"))
-    checks = {"service": "knowledge-base"}
+def _run_dependency_checks() -> dict:
+    """探测各依赖的实时状态。"""
+    checks: dict = {"service": "knowledge-base", "version": "1.0.0"}
 
     # 1. ChromaDB
     try:
         from .store import get_client
-        client = get_client()
-        client.heartbeat()
+        get_client().heartbeat()
         checks["chromadb"] = "ok"
     except Exception as e:
         checks["chromadb"] = f"unhealthy: {str(e)[:100]}"
-        log.warning("health_check_chromadb_failed", error=str(e)[:100])
 
     # 2. SQLite
     try:
@@ -160,26 +184,58 @@ def health(request: Request):
         checks["sqlite"] = "ok"
     except Exception as e:
         checks["sqlite"] = f"unhealthy: {str(e)[:100]}"
-        log.warning("health_check_sqlite_failed", error=str(e)[:100])
 
     # 3. LLM API 可达性（可选）
     # Bug #10 修复：HEAD 请求对 chat/completions 端点必然失败（不支持 HEAD），
     # 且默认 base_url 是 OpenAI 而实际可能用 DeepSeek。
     # 改为仅校验 key 是否配置（不产生真实 API 调用开销；真实调用失败会在请求时体现）。
-    try:
-        api_key = os.getenv("LLM_API_KEY", "")
-        if api_key:
-            checks["llm_api"] = "ok"
-        else:
-            checks["llm_api"] = "skipped (no API key)"
-    except Exception as e:  # noqa: BLE001
-        checks["llm_api"] = f"unreachable: {str(e)[:100]}"
+    api_key = os.getenv("LLM_API_KEY", "")
+    checks["llm_api"] = "ok" if api_key else "skipped (no API key)"
 
-    all_healthy = all(
-        v == "ok" or v.startswith("skipped")
-        for v in [checks.get("chromadb", ""), checks.get("sqlite", ""), checks.get("llm_api", "")]
-    )
-    checks["status"] = "ok" if all_healthy else "degraded"
+    critical_ok = checks["chromadb"] == "ok" and checks["sqlite"] == "ok"
+    # LLM 未配置（skipped）只记为中性：生产环境配置校验本就强制要求 LLM_API_KEY，
+    # 这里的 skipped 只出现在开发/测试环境，不该把状态标成 degraded。
+    llm_value = checks["llm_api"]
+    llm_bad = not (llm_value == "ok" or llm_value.startswith("skipped"))
+    degraded = not critical_ok or llm_bad
 
-    log.info("health_check_completed", status=checks["status"], chromadb=checks.get("chromadb"), sqlite=checks.get("sqlite"))
+    checks["status"] = "ok" if not degraded else ("unavailable" if not critical_ok else "degraded")
     return checks
+
+
+@app.get("/health")
+def health(request: Request):
+    """存活探针：只证明进程还能处理请求，不探测外部依赖。
+
+    刻意保持极简——容器编排用它判断"要不要重启这个进程"，
+    依赖抖动不该触发重启风暴（那属于 /ready 的职责）。
+    """
+    return {"status": "ok", "service": "knowledge-base", "version": "1.0.0"}
+
+
+@app.get("/health/detail")
+def health_detail(request: Request):
+    """依赖明细：始终 200，由 body 表达健康度。"""
+    log = get_logger(__name__).bind(request_id=getattr(request.state, "request_id", "unknown"))
+    checks = _run_dependency_checks()
+    if checks["status"] != "ok":
+        log.warning(
+            "health_check_degraded",
+            status=checks["status"],
+            chromadb=checks.get("chromadb"),
+            sqlite=checks.get("sqlite"),
+            llm_api=checks.get("llm_api"),
+        )
+    return checks
+
+
+@app.get("/ready")
+def ready(request: Request):
+    """就绪探针：关键依赖（向量库 + 关系库）不可用时返回 503。
+
+    LLM Key 缺失只标 degraded 但不摘除节点——检索/知识库功能仍然可用。
+    """
+    checks = _run_dependency_checks()
+    critical_ok = checks["chromadb"] == "ok" and checks["sqlite"] == "ok"
+    status_code = 200 if critical_ok else 503
+    return JSONResponse(status_code=status_code, content=checks)

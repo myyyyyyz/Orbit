@@ -27,8 +27,8 @@ export function AuthForm({ onSkip }: AuthFormProps) {
     try {
       const fn = isRegister ? auth.register : auth.login;
       const res = await fn(username, password);
-      // 后端返回 access_token（兼容 token 旧字段）
-      login(username, res.access_token ?? res.token);
+      // 后端返回 access_token + refresh_token（refresh 用于到期自动续期）
+      login(username, res.access_token, res.refresh_token, res.role);
     } catch (err) {
       setError(err instanceof Error ? err.message : "操作失败");
     } finally {
@@ -132,7 +132,7 @@ export function AuthForm({ onSkip }: AuthFormProps) {
               type="password"
               value={password}
               onChange={setPassword}
-              placeholder={isRegister ? "至少 6 位字符" : "输入密码"}
+              placeholder={isRegister ? "至少 8 位字符" : "输入密码"}
               autoComplete={isRegister ? "new-password" : "current-password"}
             />
 

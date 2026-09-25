@@ -19,6 +19,8 @@ from .storage import (
     put,
     stats,
     clear,
+    purge_namespace,
+    purge_user,
 )
 
 __all__ = [
@@ -34,4 +36,6 @@ __all__ = [
     "put",
     "stats",
     "clear",
+    "purge_namespace",
+    "purge_user",
 ]

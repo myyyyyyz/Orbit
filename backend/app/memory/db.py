@@ -1,16 +1,16 @@
 """记忆数据库：连接与建表"""
 
-import sqlite3
 import os
+
+from ..sqlite_utils import connect as _sqlite_connect
 
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "memory.db")
 
 
 def _get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    # 统一 PRAGMA（WAL + busy_timeout），详见 app/sqlite_utils.py
+    return _sqlite_connect(DB_PATH)
 
 
 def init_memory_db():

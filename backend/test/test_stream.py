@@ -1,11 +1,20 @@
-"""stream/ — SSE 流式问答模块测试（search/route_model/LLM 全部 mock）"""
+"""stream/ — SSE 流式问答模块测试（检索规划/路由/LLM 全部 mock）"""
 import json
 
 import pytest
 
 import app.stream.service as stream_mod  # patch 目标：stream_ask 定义所在模块
 from app.stream import stream_ask, _sse, MIN_RELEVANCE_SCORE  # 验证 __init__ 再导出兼容
+from app.retrieval import RetrievalPlan
 from app.router import RouteDecision
+
+
+@pytest.fixture(autouse=True)
+def _stable_cache_namespace(monkeypatch):
+    """缓存命名空间依赖活跃索引版本；测试里固定住，避免触库/触向量库。"""
+    class _V:
+        collection_name = "test_collection"
+    monkeypatch.setattr(stream_mod, "resolve_active_version", lambda uid: _V())
 
 
 def _parse_sse(raw_events):
@@ -23,11 +32,21 @@ def _fake_route(model="gpt-4o-mini"):
     return RouteDecision(tier="fast", model=model, max_tokens=500, temperature=0.3, confidence=0.85)
 
 
-def _mock_pipeline(monkeypatch, chunks):
-    """mock 检索与路由，cache 不命中"""
-    monkeypatch.setattr(stream_mod, "cache_get", lambda q: None)
+def _mock_pipeline(monkeypatch, chunks, retrieve=True):
+    """mock 检索规划与执行，cache 不命中。
+
+    阈值过滤现在发生在检索执行层（retrieval planner），因此这里直接把
+    「已过滤后的 chunk 列表」交给 execute_retrieval_plan 的返回值。
+    """
+    monkeypatch.setattr(stream_mod, "cache_get", lambda q, **kw: None)
     monkeypatch.setattr(stream_mod, "cache_put", lambda *a, **k: None)
-    monkeypatch.setattr(stream_mod, "search", lambda q, k, u: chunks)
+    monkeypatch.setattr(
+        stream_mod, "plan_retrieval",
+        lambda q, user_id=None, api_key=None: RetrievalPlan(
+            retrieve=retrieve, strategy="vector", top_k=5, threshold=MIN_RELEVANCE_SCORE,
+        ),
+    )
+    monkeypatch.setattr(stream_mod, "execute_retrieval_plan", lambda q, user_id=None, plan=None, api_key=None: chunks)
     monkeypatch.setattr(stream_mod, "route_model", lambda q, s: _fake_route())
 
 
@@ -52,7 +71,7 @@ def test_sse_chinese_not_escaped():
 # ── 缓存分支 ──
 
 def test_cache_hit_short_circuits(monkeypatch):
-    monkeypatch.setattr(stream_mod, "cache_get", lambda q: {
+    monkeypatch.setattr(stream_mod, "cache_get", lambda q, **kw: {
         "answer": "缓存答案", "sources": [{"source": "a.md"}], "cache_hit_score": 0.99,
     })
     events = _parse_sse(list(stream_ask("已缓存的问题")))
@@ -65,11 +84,35 @@ def test_cache_hit_short_circuits(monkeypatch):
     assert done["cached"] is True
 
 
-# ── 相关度阈值过滤（Bug3 修复的核心逻辑）──
+def test_cache_lookup_uses_tenant_namespace(monkeypatch, mock_llm):
+    """P0 回归：缓存读写必须带租户命名空间，否则跨用户串味。"""
+    seen = {}
+
+    def fake_get(q, **kw):
+        seen["get_ns"] = kw.get("namespace")
+        return None
+
+    def fake_put(q, answer, sources, model, **kw):
+        seen["put_ns"] = kw.get("namespace")
+
+    monkeypatch.setattr(stream_mod, "cache_get", fake_get)
+    monkeypatch.setattr(stream_mod, "cache_put", fake_put)
+    monkeypatch.setattr(
+        stream_mod, "plan_retrieval",
+        lambda q, user_id=None, api_key=None: RetrievalPlan(retrieve=False),
+    )
+    monkeypatch.setattr(stream_mod, "route_model", lambda q, s: _fake_route())
+
+    list(stream_ask("问题", user_id=42, api_key="k"))
+    assert seen["get_ns"] is not None and seen["get_ns"].startswith("42:")
+    assert seen["put_ns"] == seen["get_ns"]
+
+
+# ── 相关度阈值过滤（现由检索执行层负责，此处验证下游表现）──
 
 def test_low_score_chunks_filtered_out(monkeypatch):
-    """低于 MIN_RELEVANCE_SCORE 的检索结果被过滤 → 无 key 时走'与知识库无关'文案"""
-    _mock_pipeline(monkeypatch, [NOISE_CHUNK])
+    """检索层把低分结果过滤掉（返回空）→ 无 key 时走'与知识库无关'文案"""
+    _mock_pipeline(monkeypatch, [])
     events = _parse_sse(list(stream_ask("hello")))
     answer = next(d for e, d in events if e == "answer")
     assert "与知识库无关" in answer["text"]
@@ -79,10 +122,10 @@ def test_low_score_chunks_filtered_out(monkeypatch):
 
 
 def test_high_score_chunks_pass_filter(monkeypatch):
-    _mock_pipeline(monkeypatch, [GOOD_CHUNK, NOISE_CHUNK])
+    _mock_pipeline(monkeypatch, [GOOD_CHUNK])
     events = _parse_sse(list(stream_ask("Orbit 是什么")))
     retrieved = next(d for e, d in events if e == "status" and d.get("stage") == "retrieved")
-    assert retrieved["count"] == 1  # 低分 chunk 被过滤
+    assert retrieved["count"] == 1
     answer = next(d for e, d in events if e == "answer")
     assert "intro.md" in answer["text"]  # 无 key fallback 引用高分来源
     assert "noise.md" not in str(answer)
@@ -118,7 +161,7 @@ def test_llm_stream_rag_mode(monkeypatch, mock_llm):
 
 def test_llm_stream_chat_mode_when_no_relevant(monkeypatch, mock_llm):
     """无相关检索结果但有 key → 纯对话模式（不带检索上下文）"""
-    _mock_pipeline(monkeypatch, [NOISE_CHUNK])
+    _mock_pipeline(monkeypatch, [])
     events = _parse_sse(list(stream_ask("hello", api_key="sk-test", model="gpt-4o-mini")))
     tokens = [d["text"] for e, d in events if e == "token"]
     assert tokens == ["你好", "，世界"]

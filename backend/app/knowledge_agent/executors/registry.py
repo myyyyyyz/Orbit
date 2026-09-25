@@ -11,6 +11,7 @@ from app.knowledge_agent.executors.pdf import (
     PdfOcrReviewExecutor,
     PdfTextHierarchicalExecutor,
 )
+from app.knowledge_agent.executors.pdf_vision import PdfVisionExecutor
 from app.knowledge_agent.executors.xlsx import SpreadsheetStructuredExecutor
 
 
@@ -23,5 +24,6 @@ def build_executor_registry(
         "docx_layout_aware_v1": DocxLayoutAwareExecutor(),
         "spreadsheet_structured_v1": SpreadsheetStructuredExecutor(),
         "pdf_text_hierarchical_v1": PdfTextHierarchicalExecutor(),
+        "pdf_vision_v1": PdfVisionExecutor(),
         "pdf_ocr_review_v1": PdfOcrReviewExecutor(ocr_adapter),
     }

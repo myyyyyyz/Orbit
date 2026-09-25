@@ -29,19 +29,32 @@ services:
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY 未设置，请先配置 .env}
       LLM_BASE_URL: ${LLM_BASE_URL:-https://api.deepseek.com/v1/chat/completions}
       LLM_MODEL: ${LLM_MODEL:-deepseek-chat}
+      # Fallback 必须能指向**另一个**端点，否则跨厂商降级会把请求发回主模型
       LLM_FALLBACK_MODEL: ${LLM_FALLBACK_MODEL:-}
       LLM_FALLBACK_API_KEY: ${LLM_FALLBACK_API_KEY:-}
+      LLM_FALLBACK_BASE_URL: ${LLM_FALLBACK_BASE_URL:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       KNOWLEDGE_ROOT: /app/knowledge
+      # Agent Loop 允许落盘的根目录白名单（生产环境必须配置，否则拒绝绝对路径）
+      AGENT_ALLOWED_ROOTS: ${AGENT_ALLOWED_ROOTS:-/app/knowledge}
+      # 令牌时效：access 短、refresh 长（登录接口会同时下发两者）
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
+      REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      # 多副本部署时只在其中一个副本置 1，其余置 0（另有 DB 原子抢占兜底）
+      ENABLE_SCHEDULER: ${ENABLE_SCHEDULER:-1}
+      # 部署在反向代理后必须置 1，否则限流按代理 IP 分桶会误伤所有用户
+      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-}
+      SQLITE_BUSY_TIMEOUT_MS: ${SQLITE_BUSY_TIMEOUT_MS:-15000}
       ENABLE_PROMETHEUS: ${ENABLE_PROMETHEUS:-}
       SENTRY_DSN: ${SENTRY_DSN:-}
     restart: unless-stopped
     healthcheck:
+      # 用 /ready 而非 /health：只有依赖真正就绪才允许依赖方（前端）启动
       test:
         - CMD-SHELL
         - >-
           python -c "import urllib.request,sys;
-          r=urllib.request.urlopen('http://localhost:8001/health',timeout=5);
+          r=urllib.request.urlopen('http://localhost:8001/ready',timeout=5);
           sys.exit(0 if r.status==200 else 1)"
       interval: 30s
       timeout: 10s

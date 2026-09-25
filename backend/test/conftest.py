@@ -74,8 +74,13 @@ def _purge_collections_and_cache() -> None:
         pass
     # collections 删除后必须同步失效 search 的 count 缓存（5s TTL），
     # 否则空库判断失效 → n_results=0 的 query 报错
-    from app.search import _invalidate_count_cache
-    _invalidate_count_cache()
+    # 注意：app.search 会连带 import chromadb，轻量单测环境下可能不可用，
+    # 因此这里不能让它把整个测试会话带崩。
+    try:
+        from app.search import _invalidate_count_cache
+        _invalidate_count_cache()
+    except Exception:
+        pass
 
 
 @pytest.fixture(autouse=True)
@@ -83,6 +88,25 @@ def _clean_state():
     yield
     _purge_collections_and_cache()
     _purge_branch_locks()
+    _reset_global_state()
+
+
+def _reset_global_state() -> None:
+    """复位跨用例累积的模块级全局状态。
+
+    - LLM 熔断器：失败计数累积到阈值后会打开，导致后续用例静默走 fallback 分支。
+    - 令牌撤销表：某个用例登出后会把 jti 永久留在撤销表里。
+    """
+    try:
+        from app.llm.retry import reset_circuit_breakers
+        reset_circuit_breakers()
+    except Exception:
+        pass
+    try:
+        from app.middleware.auth import reset_revocation_store
+        reset_revocation_store()
+    except Exception:
+        pass
 
 
 @pytest.fixture(scope="session")

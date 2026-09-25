@@ -9,6 +9,12 @@ import os
 import sys
 from typing import Optional, Literal
 
+from .env_loader import load_env
+
+# 幂等：正常情况下 app/__init__.py 已加载过。此处显式调用是为了保证
+# 「单独 import app.config」时 DATA_DIR / DATABASE_URL 等也已就绪。
+load_env()
+
 # ─────────────────────────────────────────────────────────────
 # 数据根目录解析
 #
@@ -223,25 +229,50 @@ os.makedirs(settings.rag.storage.persist_dir, exist_ok=True)
 
 # ── P1-3: 环境配置启动时验证 ──
 
+class ConfigError(RuntimeError):
+    """启动配置错误：拒绝启动，避免带着半配置状态对外提供服务。"""
+
+
+def is_production() -> bool:
+    return os.getenv("ENV", "development").lower() in ("prod", "production")
+
+
 def _validate_config_on_startup():
     """启动时校验关键配置，缺失或无效则拒绝启动。
 
     在 lifespan 中调用，确保问题尽早暴露而非静默降级。
+
+    策略统一说明（历史上 auth.py 与 config.py 对 SECRET_KEY 采取了两套**相反**策略：
+    config 缺了就拒绝启动，auth.py 缺了就自造随机 key）：
+    - 生产环境（ENV=production）：SECRET_KEY 缺失/过短 → 拒绝启动。
+    - 非生产环境：仅告警（由 middleware/auth.py 生成开发用随机 key）。
     """
     errors = []
+    warnings = []
 
     # LLM API Key
     llm_api_key = os.getenv("LLM_API_KEY", "").strip()
     if not llm_api_key:
         errors.append("LLM_API_KEY 未设置。请在 .env 文件中配置 LLM_API_KEY。")
 
-    # JWT Secret Key
+    # JWT Secret Key —— 生产环境强校验，非生产仅告警
     jwt_secret = os.getenv("SECRET_KEY", "").strip()
-    if len(jwt_secret) < 16:
-        errors.append(
-            "SECRET_KEY 未设置或长度不足（需 >= 16 字符）。"
-            "缺少 SECRET_KEY 会导致每次重启后所有用户 Token 失效。"
+    if len(jwt_secret) < 32:
+        msg = (
+            f"SECRET_KEY 未设置或长度不足（当前 {len(jwt_secret)} 字符，生产环境需 >= 32）。"
+            "生成方式：python3 -c \"import secrets; print(secrets.token_hex(32))\"。"
+            "变更 SECRET_KEY 会导致所有已签发 Token 立即失效。"
         )
+        if is_production():
+            errors.append(msg)
+        else:
+            warnings.append(msg + "（当前为开发环境，将使用进程内随机密钥，重启后 Token 失效）")
+
+    # Fallback 模型自洽性：配了 fallback 模型就必须有 key，否则降级不可能生效
+    fb_model = (os.getenv("LLM_FALLBACK_MODEL") or "").strip()
+    fb_key = (os.getenv("LLM_FALLBACK_API_KEY") or "").strip()
+    if fb_model and not (fb_key or llm_api_key):
+        errors.append("配置了 LLM_FALLBACK_MODEL 但没有任何可用 API Key，降级无法生效。")
 
     # CORS Origins（生产环境不应使用通配符 *）
     cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000")
@@ -256,6 +287,9 @@ def _validate_config_on_startup():
         except OSError as e:
             errors.append(f"无法创建 ChromaDB 持久化目录 {persist_dir}: {e}")
 
+    for w in warnings:
+        print(f"[config][warn] {w}", file=sys.stderr)
+
     if errors:
         print("\n" + "=" * 60, file=sys.stderr)
         print(" 配置错误 — 服务拒绝启动", file=sys.stderr)
@@ -263,5 +297,7 @@ def _validate_config_on_startup():
         for i, err in enumerate(errors, 1):
             print(f" [{i}] {err}", file=sys.stderr)
         print("=" * 60 + "\n", file=sys.stderr)
-        sys.exit(1)
+        # 抛 ConfigError 而非 sys.exit：在 ASGI lifespan 中 SystemExit 会被 uvicorn
+        # 以不容易定位的形式吞掉/打印，异常更适合作为失败信号。
+        raise ConfigError("；".join(errors))
 

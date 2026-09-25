@@ -1,4 +1,5 @@
 """知识库核心路由: /api/knowledge/*"""
+import asyncio
 import os
 import uuid
 import aiofiles
@@ -13,11 +14,28 @@ from ..store import add_documents, delete_by_source, get_stats
 from ..search import resolve_active_version, search, search_formatted
 from ..generate import generate_answer
 from ..router import route_model
-from ..cache import get as cache_get, put as cache_put
+from ..cache import get as cache_get, put as cache_put, purge_user as cache_purge_user
 from ..stream import stream_ask
 from ..middleware.auth import get_optional_user
+from ..rate_limit import limiter
 
 router = APIRouter(prefix="/api/v1/knowledge", tags=["knowledge"])
+
+
+def _invalidate_user_cache(user_id) -> None:
+    """知识库内容变更后清空该用户的语义缓存。
+
+    不做这一步的话，用户上传新文档后提问仍会命中"上传前"的缓存答案，
+    而且因为走的是缓存命中路径，不会有任何报错——属于静默给出错误答案。
+    """
+    try:
+        removed = cache_purge_user(user_id)
+        if removed:
+            from ..logging_config import get_logger
+            get_logger(__name__).info("semantic_cache_invalidated", user_id=user_id, removed=removed)
+    except Exception:
+        from ..logging_config import get_logger
+        get_logger(__name__).warning("semantic_cache_invalidation_failed", user_id=user_id, exc_info=True)
 
 
 @router.get("/stats")
@@ -32,7 +50,12 @@ def api_supported_types():
 
 
 @router.post("/upload")
-async def api_upload(file: UploadFile = File(...), current_user: Optional[dict] = Depends(get_optional_user)):
+@limiter.limit("30/minute")
+async def api_upload(
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: Optional[dict] = Depends(get_optional_user),
+):
     if not file.filename:
         raise HTTPException(400, "文件名不能为空")
     if not get_file_type(file.filename):
@@ -52,19 +75,25 @@ async def api_upload(file: UploadFile = File(...), current_user: Optional[dict] 
         await f.write(content)
 
     try:
-        text, file_type = parse_file(filepath)
+        # 解析是 CPU/IO 密集的同步操作，直接在 async 端点里跑会冻结事件循环
+        text, file_type = await asyncio.to_thread(parse_file, filepath)
     except Exception as e:
         raise HTTPException(500, f"文件解析失败: {str(e)}")
 
     if not text or not text.strip():
         raise HTTPException(400, "文件内容为空")
 
-    chunks = chunk_text(text, metadata={"source": safe_filename, "file_type": file_type, "char_count": len(text)})
+    chunks = await asyncio.to_thread(
+        chunk_text, text,
+        metadata={"source": safe_filename, "file_type": file_type, "char_count": len(text)},
+    )
     if not chunks:
         raise HTTPException(500, "文本切割失败")
 
     user_id = current_user["user_id"] if current_user else None
-    count = add_documents(chunks, user_id)
+    # 切片 → embedding → 写库同样是同步阻塞链路，统一移出事件循环
+    count = await asyncio.to_thread(add_documents, chunks, user_id)
+    _invalidate_user_cache(user_id)
     return {
         "status": "ok", "filename": safe_filename, "file_type": file_type,
         "char_count": len(text), "chunks": count, "user_scoped": user_id is not None,
@@ -73,16 +102,22 @@ async def api_upload(file: UploadFile = File(...), current_user: Optional[dict] 
 
 
 @router.post("/upload-text")
+@limiter.limit("30/minute")
 async def api_upload_text(
+    request: Request,
     text: str = Query(..., description="要索引的文本内容"),
     source: str = Query("manual", description="来源标识"),
     current_user: Optional[dict] = Depends(get_optional_user),
 ):
     if not text or not text.strip():
         raise HTTPException(400, "文本内容不能为空")
-    chunks = chunk_text(text, metadata={"source": source, "file_type": "text", "char_count": len(text)})
+    chunks = await asyncio.to_thread(
+        chunk_text, text,
+        metadata={"source": source, "file_type": "text", "char_count": len(text)},
+    )
     user_id = current_user["user_id"] if current_user else None
-    count = add_documents(chunks, user_id)
+    count = await asyncio.to_thread(add_documents, chunks, user_id)
+    _invalidate_user_cache(user_id)
     return {"status": "ok", "source": source, "char_count": len(text), "chunks": count, "user_scoped": user_id is not None}
 
 
@@ -106,6 +141,7 @@ def api_delete_source(
 ):
     user_id = current_user["user_id"] if current_user else None
     delete_by_source(source, user_id)
+    _invalidate_user_cache(user_id)
     return {"status": "ok", "source": source, "message": f"已删除 {source} 的索引"}
 
 
@@ -120,6 +156,7 @@ def api_context(
 
 
 @router.post("/ask")
+@limiter.limit("60/minute")
 def api_ask(request: Request, body: dict = Body(...), current_user: Optional[dict] = Depends(get_optional_user)):
     """RAG 完整闭环: 用户问题 → 缓存检查 → 检索 → 模型路由 → LLM 生成 → 带引用返回"""
     question = body.get("question", "").strip()
@@ -180,6 +217,7 @@ def api_ask(request: Request, body: dict = Body(...), current_user: Optional[dic
 
 
 @router.get("/ask/stream")
+@limiter.limit("60/minute")
 def api_ask_stream(
     request: Request,
     q: str = Query(..., description="用户问题"),

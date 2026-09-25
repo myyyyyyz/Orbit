@@ -690,21 +690,49 @@ def _max_test_level(plan: Plan) -> str:
 
 # ── Builder 落盘（D4: 直接落盘 + git 快照兜底）──────────────────
 
+def _allowed_project_roots() -> list:
+    """允许作为落盘目标的绝对路径根（AGENT_ALLOWED_ROOTS / KNOWLEDGE_ROOT）。"""
+    raw = os.getenv("AGENT_ALLOWED_ROOTS") or os.getenv("KNOWLEDGE_ROOT") or ""
+    parts = []
+    for chunk in raw.replace(os.pathsep, ",").split(","):
+        chunk = chunk.strip()
+        if chunk:
+            parts.append(os.path.realpath(chunk))
+    return parts
+
+
 def _resolve_safe_project_dir(project_dir: str) -> Optional[str]:
     """解析落盘目录并校验无路径穿越（安全规则 #6）。
 
     - 相对路径：限制在 _AGENTS_ROOT 下。
-    - 绝对路径：允许用户显式指定目录（如真实项目路径），但 realpath 必须落在该路径下。
+    - 绝对路径：realpath 必须落在允许根内。
+      ⚠️ 上线加固：旧实现允许**任意绝对路径**，等于任何登录用户都能让 Builder
+      往 /etc 或 ~ 写文件。现在改为：配置了 AGENT_ALLOWED_ROOTS / KNOWLEDGE_ROOT
+      时必须在根内；生产环境未配置任何允许根时，直接拒绝绝对路径。
     """
     if not project_dir:
         return None
+
     if os.path.isabs(project_dir):
         real = os.path.realpath(project_dir)
-        target = os.path.realpath(os.path.join(real, "."))
-        if os.path.commonpath([real, target]) != real:
-            logger.warning("拒绝越界落盘目录: %s", project_dir)
+        roots = _allowed_project_roots()
+        if roots:
+            if not any(real == r or real.startswith(r + os.sep) for r in roots):
+                logger.warning(
+                    "拒绝越界落盘目录（不在允许根内）: %s (roots=%s)", project_dir, roots,
+                )
+                return None
+            return real
+
+        from ..config import is_production
+        if is_production():
+            logger.warning(
+                "拒绝绝对落盘目录（生产环境未配置 AGENT_ALLOWED_ROOTS）: %s", project_dir,
+            )
             return None
-        return target
+        logger.warning("允许绝对落盘目录（非生产环境，未配置允许根）: %s", project_dir)
+        return real
+
     root = os.path.realpath(_AGENTS_ROOT)
     target = os.path.realpath(os.path.join(root, project_dir))
     if os.path.commonpath([root, target]) != root:
@@ -777,7 +805,10 @@ async def _execute_verification_with_approval(
         if (decision or {}).get("decision") == "approve":
             approved = {v["command"] for v in approval_items}
     exec_cmds = allow_cmds + [v["command"] for v in approval_items if v["command"] in approved]
-    results = _run_verification(exec_cmds, project_dir, gate, approved)
+    # P0-4: _run_verification 内部是同步 subprocess（单命令 timeout=30s，逐条串行），
+    # 直接 await 之外调用会冻结整个事件循环（所有 SSE 流 + 其它请求全部停摆），
+    # 因此与 LLM 调用一致地丢进线程池执行。
+    results = await asyncio.to_thread(_run_verification, exec_cmds, project_dir, gate, approved)
     for v in approval_items:
         if v["command"] not in approved:
             results.append({
@@ -1116,7 +1147,9 @@ async def run_loop(
                 await _finish(loop_id, "failed")
                 return
 
-        apply_result = _apply_build(build, worktree_path)
+        # P0-4: _apply_build 内含同步 subprocess（git stash，timeout=10s）+ 同步落盘，
+        # 移出事件循环，避免阻塞其它请求与 SSE 推送。
+        apply_result = await asyncio.to_thread(_apply_build, build, worktree_path)
         last_effects = apply_result.get("effects", [])
         # P4: 执行 Builder 的验证命令，产出 Reviewer 证据
         verify_results = await _execute_verification_with_approval(
@@ -1229,7 +1262,8 @@ async def run_loop(
                 await _emit(loop_id, "system", "error", {"message": "Gate 拦截重试"}, notify=True)
                 await _finish(loop_id, "failed")
                 return
-            apply_result = _apply_build(build, worktree_path)
+            # P0-4: 同上，退回重试后的落盘同样移出事件循环
+            apply_result = await asyncio.to_thread(_apply_build, build, worktree_path)
             last_effects = apply_result.get("effects", [])
             # P4: 退回重试后同样执行验证命令
             verify_results = await _execute_verification_with_approval(
