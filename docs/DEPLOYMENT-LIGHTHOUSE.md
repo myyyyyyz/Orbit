@@ -1,6 +1,6 @@
 # Orbit 上线部署记录（腾讯云轻量应用服务器）
 
-> 部署日期：2026-09-25 ｜ 分支：`dev/optimize`
+> 部署日期：2026-09-25 ｜ 上线分支：`master`（开发在 `dev/optimize`）
 > 访问地址：**http://111.230.136.238**
 
 ---
@@ -34,7 +34,7 @@
 | 组件 | 位置 | 说明 |
 |---|---|---|
 | 服务器 | 广州 · `lhins-mm3daxmx` | 2 核 2G / 50G SSD / 4Mbps |
-| 仓库 | `/opt/orbit` | 从 GitHub `dev/optimize` 克隆 |
+| 仓库 | `/opt/orbit` | 从 GitHub `master`（上线分支）克隆 |
 | 配置 | `/opt/orbit/.env` | 权限 600，**不入仓库** |
 | 反代 | `/etc/caddy/Caddyfile` | 宿主 Caddy，占用 80 |
 | 容器 | `orbit-backend` / `orbit-frontend` | 均 `restart: unless-stopped` |
@@ -109,13 +109,33 @@ free -m; df -h /                     # 资源余量
 
 ### 更新代码（发布新版本）
 
+上线分支是 **`master`**，服务器只跟 `master`。发版分两步：
+
+**① 本地：把开发分支同步为上线分支**
+
+```bash
+# 在 dev/optimize 上提交完开发改动后
+bash scripts/sync-master.sh --push
+```
+
+脚本把 `dev/optimize` 的内容整体同步到 `master`，剔除开发文档与测试脚本
+（清单见脚本内 `RELEASE_EXCLUDES`，唯一事实源），每次生成**一个** release 提交，
+并在提交前校验「差异恰好等于排除清单」——非排除项漏同步会直接中止。
+脚本幂等：dev 无新提交时重跑不会产生空提交。
+
+**② 服务器：拉取并重建**
+
 ```bash
 cd /opt/orbit
-git pull origin dev/optimize
+git pull --ff-only origin master
 docker compose build backend frontend   # 依赖未变时秒级完成
 docker compose up -d                    # 滚动重建变更的容器
 docker compose ps
 ```
+
+> 回滚：`git log --oneline master` 找到上一个 release 提交，执行
+> `git reset --hard <sha> && docker compose build && docker compose up -d`。
+> 本地另有 `backup/master-pre-release-sync` 标签，指向改造前的 master。
 
 ### 重启 / 停止
 
