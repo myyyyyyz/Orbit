@@ -10,13 +10,14 @@
 #      master 历史只有发版记录，不掺入开发分支的中间提交；
 #   3. 只做快进 + 追加提交，绝不改写 master 已有历史；
 #   4. 提交前先校验「暂存内容相对 dev 的差异恰好等于排除清单」，
-#      任何非排除项漏进 master 都会直接中止。
+#      任何非排除项漏进 master 都会直接中止；
+#   5. 幂等：重复执行且 dev 无新提交时不会产生空提交。
 #
 # 用法：
 #   bash scripts/sync-master.sh          # 生成 release 提交（本地）
 #   bash scripts/sync-master.sh --push   # 生成并推送两个分支
 #
-# 注意：脚本面向 macOS 自带的 bash 3.2，不使用 mapfile / 关联数组。
+# 注意：脚本面向 macOS 自带 bash 3.2，不使用 mapfile / 关联数组 / case-in-$()。
 # ─────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -77,23 +78,51 @@ done < <(
     | grep -E '\.(test|spec)\.(ts|tsx|js|jsx)$' || true
 )
 
-# ── 2. 用 dev 分支的文件树整体覆盖，再逐个剔除排除项 ────────
-info "以 $DEV_BRANCH 的文件树重建 $REL_BRANCH 内容..."
-git read-tree --reset -u "$DEV_BRANCH"
+# ── 1b. 归一化：丢弃已被更上层条目覆盖的冗余路径 ────────────
+NORMALIZED=()
+i=0
+while [ "$i" -lt "${#RELEASE_EXCLUDES[@]}" ]; do
+  p="${RELEASE_EXCLUDES[$i]}"
+  covered=0
+  j=0
+  while [ "$j" -lt "${#RELEASE_EXCLUDES[@]}" ]; do
+    q="${RELEASE_EXCLUDES[$j]}"
+    if [ "$p" != "$q" ] && [ "${p#"$q"/}" != "$p" ]; then
+      covered=1
+      break
+    fi
+    j=$((j + 1))
+  done
+  if [ "$covered" = 0 ]; then
+    NORMALIZED+=("$p")
+  fi
+  i=$((i + 1))
+done
+RELEASE_EXCLUDES=("${NORMALIZED[@]}")
 
-REMOVED=0
+# ── 1c. 区分「确实存在」与「清单里写多余了」的条目 ──────────
+PRESENT=()
 MISSING=""
 for path in "${RELEASE_EXCLUDES[@]}"; do
-  if git ls-files -- "$path" | grep -q . || [ -e "$path" ]; then
-    # -f 必需：此时索引内容与 HEAD 不一致，git rm 默认会拒绝
-    git rm -r -q -f --ignore-unmatch -- "$path" || die "剔除 $path 失败"
-    REMOVED=$((REMOVED + 1))
+  if [ -n "$(git -c core.quotepath=false ls-tree -r --name-only "$DEV_BRANCH" -- "$path")" ]; then
+    PRESENT+=("$path")
   else
     MISSING="$MISSING  $path"
   fi
 done
-ok "已剔除 $REMOVED 项"
-[ -n "$MISSING" ] && warn "以下排除项在 $DEV_BRANCH 中不存在，可考虑从清单移除:$MISSING"
+if [ -n "$MISSING" ]; then
+  warn "以下排除项在 $DEV_BRANCH 中不存在，可从清单移除:$MISSING"
+fi
+
+# ── 2. 用 dev 分支的文件树整体覆盖，再逐个剔除排除项 ────────
+info "以 $DEV_BRANCH 的文件树重建 $REL_BRANCH 内容..."
+git read-tree --reset -u "$DEV_BRANCH"
+
+for path in "${PRESENT[@]}"; do
+  # -f 必需：此时索引内容与 HEAD 不一致，git rm 默认会拒绝执行
+  git rm -r -q -f --ignore-unmatch -- "$path" || die "剔除 $path 失败"
+done
+ok "已剔除 ${#PRESENT[@]} 项"
 
 # ── 3. 提交前校验：与 dev 的差异必须恰好是排除清单 ──────────
 EXFILE="$(mktemp)"
@@ -113,7 +142,7 @@ rm -f "$EXFILE"
 
 if [ -n "$LEAK" ]; then
   printf '%s\n' "$LEAK" | head -30 >&2
-  die "以上文件不在排除清单内却未同步，请检查 RELEASE_EXCLUDES"
+  die "以上文件不在排除清单内却未同步到 $REL_BRANCH，请检查 RELEASE_EXCLUDES"
 fi
 ok "校验通过：相对 $DEV_BRANCH 的差异仅为排除项"
 
