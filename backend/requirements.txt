@@ -17,6 +17,8 @@ structlog==24.4.0
 tenacity==9.0.0
 pybreaker==1.0.0
 alembic==1.16.0
+# 本地（非 Docker）启动时加载项目根 .env；缺失时 app/env_loader.py 有内置降级解析器
+python-dotenv==1.0.1
 # P2 可观测性（可选）
 # prometheus-fastapi-instrumentator==7.0.0  # 取消注释以启用 /metrics 端点
 # sentry-sdk==2.29.0  # 取消注释以启用错误追踪
@@ -24,3 +26,8 @@ alembic==1.16.0
 python-docx==1.1.2
 openpyxl==3.1.5
 reportlab==4.2.5
+# PDF 视觉摄取：渲染/提取内嵌图/按字号识别标题
+PyMuPDF==1.24.10
+Pillow==10.4.0
+# 简单图片 OCR（tesseract 二进制可选，缺失时优雅降级）
+pytesseract==0.3.13

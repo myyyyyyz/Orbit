@@ -2,17 +2,18 @@
 
 import json
 import time
-import urllib.request
 
 from ..config import settings
 from ..logging_config import get_logger
-from ..search import search
+from ..retrieval import plan_retrieval, execute_retrieval_plan
 from ..router import route_model
+from ..search import resolve_active_version
 from ..cache import get as cache_get, put as cache_put
 from ..llm import (
     get_llm_config,
+    get_fallback_llm_config,
     resolve_api_key,
-    build_chat_request,
+    build_chat_call,
     LENIENT_RAG_SYSTEM_PROMPT,
     CHAT_SYSTEM_PROMPT,
     build_context_text,
@@ -29,7 +30,24 @@ MIN_RELEVANCE_SCORE = 0.3
 logger = get_logger(__name__)
 
 
-def stream_ask(question: str, top_k: int = None, user_id: int = None, api_key: str = None, model: str = None):
+def _cache_namespace(user_id, namespace: str = None) -> str:
+    """缓存命名空间：与租户 + 活跃索引版本绑定，杜绝跨用户/跨版本串味。
+
+    非流式路径（api/knowledge.py:api_ask）一直是这样算的，流式路径此前漏了，
+    导致全租户共享同一份缓存。任何异常都退化为按 user_id 隔离，绝不退化为全局。
+    """
+    if namespace:
+        return namespace
+    try:
+        version = resolve_active_version(user_id)
+        return f"{user_id}:{version.collection_name}"
+    except Exception:
+        logger.warning("cache_namespace_resolve_failed", user_id=user_id, exc_info=True)
+        return f"{user_id}:default"
+
+
+def stream_ask(question: str, top_k: int = None, user_id: int = None,
+               api_key: str = None, model: str = None, namespace: str = None):
     """
     流式 RAG 问答生成器。
     yield SSE 格式的数据。
@@ -38,15 +56,18 @@ def stream_ask(question: str, top_k: int = None, user_id: int = None, api_key: s
         user_id: 可选，已登录用户的 ID，用于租户隔离检索。
         api_key: 前端传入的 LLM API Key，优先于环境变量。
         model: 前端传入的模型名，优先于路由器默认模型。
+        namespace: 可选，缓存命名空间；不传时按 user_id + 活跃索引版本自动推导。
     """
     if top_k is None:
         top_k = settings.rag.retrieval.top_k
+
+    cache_ns = _cache_namespace(user_id, namespace)
 
     # ── Event 1: 开始 ──
     yield _sse("status", {"stage": "start", "question": question})
 
     # ── Event 2: 检查缓存 ──
-    cached = cache_get(question)
+    cached = cache_get(question, namespace=cache_ns)
     if cached:
         yield _sse("status", {
             "stage": "cache_hit",
@@ -58,9 +79,27 @@ def stream_ask(question: str, top_k: int = None, user_id: int = None, api_key: s
 
     yield _sse("status", {"stage": "cache_miss"})
 
-    # ── Event 3: 检索（含相关度过滤）──
-    yield _sse("status", {"stage": "retrieving", "top_k": top_k})
-    chunks = [c for c in search(question, top_k, user_id) if c["score"] >= MIN_RELEVANCE_SCORE]
+    # ── Event 3: 检索规划 + 检索（查询期自适应 RAG 调度）──
+    # planner 在缓存未命中后才跑；无 API key / 调用失败 → 确定性默认计划。
+    plan = plan_retrieval(question, user_id=user_id, api_key=api_key)
+    yield _sse("status", {
+        "stage": "planned",
+        "retrieve": plan.retrieve,
+        "strategy": plan.strategy,
+        "rewritten": bool(plan.rewritten_query),
+        "subquestions": len(plan.subquestions),
+        "top_k": plan.top_k,
+        "threshold": plan.threshold,
+        "use_tools": plan.use_tools,
+    })
+
+    if not plan.retrieve:
+        # 常识/无关问题：跳过检索，直接进入纯对话生成
+        chunks = []
+        yield _sse("status", {"stage": "retrieval_skipped", "reason": "planner: no retrieval needed"})
+    else:
+        yield _sse("status", {"stage": "retrieving", "top_k": plan.top_k})
+        chunks = execute_retrieval_plan(question, user_id=user_id, plan=plan, api_key=api_key)
 
     yield _sse("status", {
         "stage": "retrieved",
@@ -106,7 +145,7 @@ def stream_ask(question: str, top_k: int = None, user_id: int = None, api_key: s
         system_prompt = CHAT_SYSTEM_PROMPT
         user_message = question
 
-    req = build_chat_request(base_url, api_key, {
+    payload = {
         "model": model_name,
         "messages": [
             {"role": "system", "content": system_prompt},
@@ -115,7 +154,18 @@ def stream_ask(question: str, top_k: int = None, user_id: int = None, api_key: s
         "temperature": route.temperature,
         "max_tokens": route.max_tokens,
         "stream": True,  # 启用流式
-    })
+    }
+    primary_call = build_chat_call(base_url, api_key, payload, timeout=60)
+
+    # fallback 用 fallback 模型/端点重建请求（复用同一个 req 会让降级形同虚设）
+    fallback_call = None
+    fallback_model = None
+    fb = get_fallback_llm_config()
+    if fb:
+        fb_key, fb_url, fallback_model = fb
+        fallback_call = build_chat_call(
+            fb_url, fb_key, {**payload, "model": fallback_model}, timeout=60,
+        )
 
     full_answer = ""
     final_model = model_name
@@ -125,8 +175,10 @@ def stream_ask(question: str, top_k: int = None, user_id: int = None, api_key: s
     start_time = time.monotonic()
     try:
         result = call_llm_with_retry(
-            call_fn=lambda: urllib.request.urlopen(req, timeout=60),
+            call_fn=primary_call,
+            fallback_call_fn=fallback_call,
             model_name=model_name,
+            fallback_model=fallback_model,
         )
         elapsed_ms = int((time.monotonic() - start_time) * 1000)
         final_model = result["model_used"]
@@ -149,8 +201,8 @@ def stream_ask(question: str, top_k: int = None, user_id: int = None, api_key: s
                 except json.JSONDecodeError:
                     continue
 
-        # 存入缓存
-        cache_put(question, full_answer, sources, final_model)
+        # 存入缓存（必须带 namespace，否则跨租户串味）
+        cache_put(question, full_answer, sources, final_model, namespace=cache_ns)
 
         logger.info(
             "stream_generate_success",

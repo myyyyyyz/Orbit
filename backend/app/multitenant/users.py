@@ -22,10 +22,19 @@ def register_user(username: str, password: str, tenant_id: str = None) -> dict:
         user_id = cursor.lastrowid
         conn.commit()
 
+        # 回读 role：schema 里是 `role TEXT DEFAULT 'user'`，由数据库决定默认值。
+        # 不要在这里硬编码 'user'——回读才能保证与登录路径（login_user 返回 row["role"]）
+        # 的结果一致，也才能在使用不同默认值的库上不出现"注册 role=null、登录 role=user"
+        # 的不对称（前端据此渲染角色相关 UI）。
+        row = conn.execute(
+            "SELECT role, tenant_id FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+
         return {
             "user_id": user_id,
             "username": username,
-            "tenant_id": tenant_id,
+            "role": row["role"] if row else None,
+            "tenant_id": row["tenant_id"] if row else tenant_id,
             "collection_name": f"user_{user_id}",
         }
     finally:

@@ -2,12 +2,12 @@
 
 import json
 import time
-import urllib.request
 
 from ..logging_config import get_logger
 from ..llm import (
     get_llm_config,
-    build_chat_request,
+    get_fallback_llm_config,
+    build_chat_call,
     STRICT_RAG_SYSTEM_PROMPT,
     build_context_text,
     build_sources,
@@ -55,18 +55,32 @@ def generate_answer(question: str, context_chunks: list[dict], history: list[dic
         }
 
     # P0-3: 调用 LLM（带重试和熔断保护）
-    req = build_chat_request(base_url, api_key, {
+    payload = {
         "model": model,
         "messages": messages,
         "temperature": 0.3,
         "max_tokens": 1000,
-    })
+    }
+    primary_call = build_chat_call(base_url, api_key, payload, timeout=30)
+
+    # 关键修复：fallback 必须用 fallback 模型/Key/端点**重建**请求，
+    # 不能复用 primary_call（旧实现在这里复用了同一个 req，降级完全无效）。
+    fallback_call = None
+    fallback_model = None
+    fb = get_fallback_llm_config()
+    if fb:
+        fb_key, fb_url, fallback_model = fb
+        fallback_call = build_chat_call(
+            fb_url, fb_key, {**payload, "model": fallback_model}, timeout=30,
+        )
 
     start_time = time.monotonic()
     try:
         result = call_llm_with_retry(
-            call_fn=lambda: urllib.request.urlopen(req, timeout=30),
+            call_fn=primary_call,
+            fallback_call_fn=fallback_call,
             model_name=model,
+            fallback_model=fallback_model,
         )
         elapsed_ms = int((time.monotonic() - start_time) * 1000)
         resp = json.loads(result["data"].read())

@@ -23,6 +23,9 @@ STRATEGY_CATALOG: dict[str, StrategyDefinition] = {
     "pdf_text_hierarchical_v1": StrategyDefinition(
         "pdf_text_hierarchical_v1", frozenset({"pdf"})
     ),
+    "pdf_vision_v1": StrategyDefinition(
+        "pdf_vision_v1", frozenset({"pdf"})
+    ),
     "pdf_ocr_review_v1": StrategyDefinition(
         "pdf_ocr_review_v1", frozenset({"pdf"}), requires_review=True
     ),

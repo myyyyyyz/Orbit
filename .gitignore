@@ -53,14 +53,6 @@ nohup.out
 # Node (for ponytail skill)
 node_modules/
 test-output/
-# 浏览器自动化调试产物（截图/快照/控制台日志）
-.playwright-cli/
 
-# 环境变量（仅提交 .env.example）
-.env
-.env.local
-
-# 临时截图与快照
-/*.png
-/*.yaml
-!docker-compose.yaml
+# WorkBuddy 本地项目数据（工作记录/应用清单，仅本地）
+.workbuddy/

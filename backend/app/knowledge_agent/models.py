@@ -1,4 +1,4 @@
-from typing import Any, Literal, Optional, Union
+from typing import Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -6,7 +6,6 @@ from pydantic import BaseModel, ConfigDict, Field
 FileType = Literal["markdown", "text", "pdf", "docx", "xlsx", "unknown"]
 DecisionSource = Literal["agent", "rule", "fallback"]
 TableQuality = Literal["stable", "messy", "unknown"]
-AgentStatus = Literal["success", "unavailable", "error"]
 RunStatus = Literal[
     "planned",
     "review_required",
@@ -52,24 +51,11 @@ class StrategyDecision(BaseModel):
     requires_review: bool = False
 
 
-class AgentAttempt(BaseModel):
-    """Sanitized metadata and optional suggestion from one Agent call."""
-
-    model_config = ConfigDict(frozen=True)
-
-    status: AgentStatus
-    model: str
-    duration_ms: int = Field(ge=0)
-    suggestion: Optional[dict[str, Union[Any]]] = None
-    error_category: Optional[str] = None
-
-
 class PlannedDocument(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     profile: CorpusProfile
     decision: StrategyDecision
-    agent_attempt: Optional[AgentAttempt] = None
 
 
 class FolderPlan(BaseModel):

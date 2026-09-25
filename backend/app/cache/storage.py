@@ -208,3 +208,38 @@ def clear():
     _hit_count = 0
     _miss_count = 0
     _history = []
+
+
+def purge_namespace(namespace: Optional[str] = None) -> int:
+    """按 namespace 精确清除缓存条目，返回清除条数。
+
+    namespace=None 时清空全部（等同于 clear()）。
+    """
+    if namespace is None:
+        n = len(_cache)
+        clear()
+        return n
+    keys = [k for k, v in _cache.items() if v.get("namespace") == namespace]
+    for k in keys:
+        _cache.pop(k, None)
+        _index.remove(k)  # C3: 同步索引
+    return len(keys)
+
+
+def purge_user(user_id) -> int:
+    """清除某用户的所有缓存条目，返回清除条数。
+
+    知识库更新（上传/删除文档）后必须调用：否则用户会拿到"更新前"的旧答案，
+    且因为是缓存命中，不会有任何报错或提示——属于静默错误。
+    这里按 `{user_id}:` 前缀匹配而非精确 namespace，因为发布新版本后
+    collection_name 会变化，精确匹配会漏掉旧命名空间下的陈旧条目。
+    """
+    prefix = f"{user_id}:"
+    keys = [
+        k for k, v in _cache.items()
+        if str(v.get("namespace") or "").startswith(prefix)
+    ]
+    for k in keys:
+        _cache.pop(k, None)
+        _index.remove(k)
+    return len(keys)

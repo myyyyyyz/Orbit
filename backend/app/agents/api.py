@@ -19,7 +19,9 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from ..config import DATA_DIR
-from ..middleware.auth import get_optional_user
+from ..logging_config import get_logger
+from ..middleware.auth import get_optional_user, require_role
+from ..rate_limit import limiter
 from ..stream.sse import _sse
 from . import db
 from .budget import DEFAULT_LOOP_TOKEN_BUDGET, set_loop_budget, get_pause_all, set_pause_all
@@ -27,6 +29,8 @@ from .orchestrator import run_loop, get_runtime
 from .schedule import compute_next_run, validate_cron
 from .schemas import LoopScheduleIn, LoopScheduleOut, GlobalSwitchOut, MetricsSummary, GraduationStatus
 from .state import load_project_state, get_graduation_status, save_project_state
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/agents", tags=["agents"])
 
@@ -42,6 +46,7 @@ def _check_loop_access(loop: Optional[dict], current_user: Optional[dict]):
 
 
 @router.post("/loop")
+@limiter.limit("10/minute")
 async def api_start_loop(
     body: dict = Body(...),
     request: Request = None,
@@ -108,9 +113,22 @@ def api_get_pause_all():
 
 
 @router.post("/loop/pause-all")
-async def api_set_pause_all(body: dict = Body(...)):
+async def api_set_pause_all(
+    body: dict = Body(...),
+    admin: dict = Depends(require_role("admin")),
+):
+    """全局急停开关 —— 影响**所有**用户的 loop，属管理操作，仅 admin 可调。
+
+    历史缺陷：只有认证没有授权，任何注册用户都能一键停掉全站 Agent Loop。
+    """
     value = bool(body.get("paused", False))
     set_pause_all(value)
+    logger.warning(
+        "global_kill_switch_changed",
+        paused=value,
+        by=admin.get("username"),
+        user_id=admin.get("user_id"),
+    )
     return GlobalSwitchOut(key="loop-pause-all", value=value)
 
 
@@ -199,6 +217,66 @@ async def api_loop_decision(
     runtime.checkpoint_event.set()
 
     return {"status": "ok", "decision": decision, "message": "决策已记录"}
+
+
+@router.get("/tool-policy")
+def api_get_tool_policy(
+    project_dir: str = "",
+    current_user: Optional[dict] = Depends(get_optional_user),
+):
+    """读取项目级工具策略（含默认值）。
+
+    返回 auto_commands（自动执行）/ approval_commands（需人工同意）
+    / default_auto_commands（gate.yaml 默认）/ is_default（是否尚未自定义）。
+    """
+    from .gate import LoopGate
+
+    user_id = current_user["user_id"] if current_user else None
+    gate = LoopGate(project_dir)
+    gate.load()
+    default_auto = list(gate.allowed_commands or [])
+
+    rec = db.get_tool_policy(user_id, project_dir) if user_id else None
+    if rec and rec.get("policy_json"):
+        pol = rec["policy_json"] or {}
+        auto = pol.get("auto_commands", default_auto)
+        approval = pol.get("approval_commands", [])
+        is_default = False
+    else:
+        auto, approval, is_default = default_auto, [], True
+
+    return {
+        "project_dir": project_dir,
+        "auto_commands": auto or [],
+        "approval_commands": approval or [],
+        "default_auto_commands": default_auto,
+        "is_default": is_default,
+    }
+
+
+@router.put("/tool-policy")
+def api_set_tool_policy(
+    body: dict = Body(...),
+    current_user: Optional[dict] = Depends(get_optional_user),
+):
+    """写入项目级工具策略（按当前用户 + 项目目录）。
+
+    body: {project_dir, auto_commands: [...], approval_commands: [...]}
+    """
+    if not current_user:
+        raise HTTPException(401, "需要登录后才能配置项目工具策略")
+    user_id = current_user["user_id"]
+    project_dir = (body.get("project_dir") or "").strip()
+    auto = body.get("auto_commands") or []
+    approval = body.get("approval_commands") or []
+    if not isinstance(auto, list) or not isinstance(approval, list):
+        raise HTTPException(400, "auto_commands / approval_commands 必须是数组字符串")
+    policy = {
+        "auto_commands": [str(x).strip() for x in auto if str(x).strip()],
+        "approval_commands": [str(x).strip() for x in approval if str(x).strip()],
+    }
+    db.upsert_tool_policy(user_id, project_dir, policy)
+    return {"status": "ok", "project_dir": project_dir, **policy}
 
 
 @router.get("/loops")

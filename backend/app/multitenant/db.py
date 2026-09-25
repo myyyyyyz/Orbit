@@ -4,13 +4,13 @@
 """
 
 import os
-import sqlite3
 import threading
 
 from alembic.config import Config as AlembicConfig
 from alembic import command
 
 from ..config import settings
+from ..sqlite_utils import connect as _sqlite_connect
 
 
 def _resolve_db_path() -> str:
@@ -42,9 +42,8 @@ _migrate_lock = threading.Lock()
 
 
 def _get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    # 统一 PRAGMA：WAL + busy_timeout + foreign_keys（详见 app/sqlite_utils.py）
+    return _sqlite_connect(DB_PATH)
 
 
 def init_db(force: bool = False) -> None:
@@ -68,15 +67,25 @@ def init_db(force: bool = False) -> None:
 
         # 数据库文件不存在时先建空文件，供 Alembic 连接
         if not os.path.exists(DB_PATH):
-            sqlite3.connect(DB_PATH).close()
+            _sqlite_connect(DB_PATH).close()
 
         alembic_ini = os.path.join(os.path.dirname(__file__), "..", "..", "alembic.ini")
         alembic_cfg = AlembicConfig(alembic_ini)
 
-        # DATABASE_URL 环境变量优先于 alembic.ini 中的配置
-        db_url = os.getenv("DATABASE_URL")
-        if db_url:
-            alembic_cfg.set_main_option("sqlalchemy.url", db_url)
+        # 始终用应用实际使用的库地址覆盖 alembic.ini 的默认值。
+        #
+        # 为什么必须无条件覆盖：alembic.ini 里写的是 `sqlite:///../multitenant.db`，
+        # 这是**相对进程 CWD** 解析的；而应用的库路径 `DB_PATH` 由
+        # `settings.DATABASE_URL` 相对 `__file__` 解析，与 CWD 无关。
+        # 未显式设置 DATABASE_URL 时（本地直接 uvicorn、非 compose 部署）
+        # 两者会指向**不同文件**：迁移把 users/sessions/tenants 建到 CWD 相对路径，
+        # 应用却去读另一个库，注册/登录直接报 `no such table: users`。
+        # compose 里因为显式设了 DATABASE_URL 才侥幸躲过——典型的"容器能跑、
+        # 本地/裸机上线就崩"。
+        #
+        # `settings.DATABASE_URL` 本身已实现"环境变量优先"，所以以它为唯一事实源
+        # 既保证与运行时同库，也不会丢失环境变量优先级。
+        alembic_cfg.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
 
         command.upgrade(alembic_cfg, "head")
         _migrated = True
