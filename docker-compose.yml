@@ -29,6 +29,9 @@ services:
       # 数据根目录必须与上方 volume 挂载点一致
       DATA_DIR: /app/data
       DATABASE_URL: sqlite:////app/data/multitenant.db
+      # embedding 模型下载源：国内直连 huggingface.co 不可达，默认走镜像站；
+      # 海外环境可覆盖为 https://huggingface.co
+      HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
       # 以下从 .env 注入，缺失时服务会拒绝启动（配置校验）
       LLM_API_KEY: ${LLM_API_KEY:?LLM_API_KEY 未设置，请先配置 .env}
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY 未设置，请先配置 .env}
