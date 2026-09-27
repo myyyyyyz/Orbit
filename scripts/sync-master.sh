@@ -241,7 +241,7 @@ build_release_commit() {
   if [ "$NEW_SHA" = "$(git rev-parse --short 'HEAD^')" ]; then
     die "release 提交未产生新对象，异常退出"
   fi
-  ok "release 提交 $NEW_SHA（作者 $AUTHOR_NAME <$AUTHOR_EMAIL>）"
+  ok "release 提交 ${NEW_SHA}（作者 ${AUTHOR_NAME} <${AUTHOR_EMAIL}>）"
   return 0
 }
 
