@@ -112,3 +112,24 @@ class TestAgentsAPI:
         token_b = create_access_token(user_b["username"], user_b["user_id"])
         r2 = client.get(f"/api/v1/agents/loop/{loop_id}", headers={"Authorization": f"Bearer {token_b}"})
         assert r2.status_code == 403
+
+    # ── 全局急停开关的鉴权（回归）────────────────────────────
+    # 修复前：GET 没有任何认证依赖，匿名请求就能探测平台是否处于全局急停状态。
+
+    def test_pause_all_get_rejects_anonymous(self, client):
+        r = client.get("/api/v1/agents/loop/pause-all")
+        assert r.status_code == 401, f"匿名读取全局急停状态未被拒绝: {r.status_code}"
+
+    def test_pause_all_get_allows_logged_in_user(self, client, auth_headers):
+        """收紧到 admin 会让普通用户的 PauseAllSwitch 拿不到真实状态，故只需登录。"""
+        r = client.get("/api/v1/agents/loop/pause-all", headers=auth_headers)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["key"] == "loop-pause-all"
+        assert isinstance(body["value"], bool)
+
+    def test_pause_all_post_still_admin_only(self, client, auth_headers):
+        """读取放宽到"已登录"，但变更必须仍是 admin 独占。"""
+        assert client.post("/api/v1/agents/loop/pause-all", json={"paused": True}).status_code == 401
+        r = client.post("/api/v1/agents/loop/pause-all", json={"paused": True}, headers=auth_headers)
+        assert r.status_code == 403, f"普通用户竟能改动全局急停开关: {r.status_code}"

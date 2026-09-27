@@ -20,7 +20,7 @@ from fastapi.responses import StreamingResponse
 
 from ..config import DATA_DIR
 from ..logging_config import get_logger
-from ..middleware.auth import get_optional_user, require_role
+from ..middleware.auth import get_current_user, get_optional_user, require_role
 from ..rate_limit import limiter
 from ..stream.sse import _sse
 from . import db
@@ -108,7 +108,17 @@ async def api_start_loop(
 # 否则字面量 "pause-all" 会被当作 loop_id 解析成 int 并返回 422。
 
 @router.get("/loop/pause-all")
-def api_get_pause_all():
+def api_get_pause_all(current_user: dict = Depends(get_current_user)):
+    """全局急停开关**状态**——必须登录才能读。
+
+    历史缺陷：本接口此前没有任何认证依赖，匿名请求即可探测平台是否处于
+    全局急停状态。状态本身不算机密，但泄露平台运行态势没有正当理由，
+    且与 POST（require_role("admin")）的安全基线不一致。
+
+    此处只要求**已登录**而非 admin：前端 `PauseAllSwitch` 对所有登录用户
+    展示当前状态，收紧到 admin 会让普通用户的 UI 拿不到真实值。
+    变更开关仍是 admin 独占（见 api_set_pause_all）。
+    """
     return GlobalSwitchOut(key="loop-pause-all", value=get_pause_all())
 
 
