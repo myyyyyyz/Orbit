@@ -18,6 +18,9 @@
 #                   紧急场景使用，需二次确认。
 #
 # 说明：脚本面向 macOS 自带 bash 3.2，不使用 mapfile / 关联数组。
+# ⚠️ 本脚本含中文提示语，务必写 ${VAR} 而不是 $VAR：
+#    bash 3.2 会把紧跟变量名的多字节字符首字节并进变量名，报
+#    "VAR<乱码>: unbound variable"，而且是在失败分支上才炸——很容易漏掉。
 # ─────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -256,7 +259,7 @@ cmd_pr() {
   DEV_SHA="$(git rev-parse --short "$DEV_BRANCH")"
   BRANCH="release/sync-$DEV_SHA"
 
-  info "基于 origin/$REL_BRANCH 创建 ${BRANCH}（源 $DEV_BRANCH@$DEV_SHA）"
+  info "基于 origin/${REL_BRANCH} 创建 ${BRANCH}（源 ${DEV_BRANCH}@${DEV_SHA}）"
   git checkout -B "$BRANCH" "origin/$REL_BRANCH" --quiet
 
   if ! build_release_commit; then
