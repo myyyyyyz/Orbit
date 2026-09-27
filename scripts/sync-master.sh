@@ -161,7 +161,7 @@ cmd_verify() {
 
   if [ -n "$bad" ]; then
     printf '%s\n' "$bad" >&2
-    die "$VERIFY_REF 的内容不符合「dev − 排除清单」（基准 $BASE）"
+    die "$VERIFY_REF 的内容不符合「dev − 排除清单」（基准 ${BASE}）"
   fi
   ok "$VERIFY_REF 校验通过：相对基准的差异恰好是排除清单（${#RELEASE_EXCLUDES[@]} 项）"
 }
@@ -256,7 +256,7 @@ cmd_pr() {
   DEV_SHA="$(git rev-parse --short "$DEV_BRANCH")"
   BRANCH="release/sync-$DEV_SHA"
 
-  info "基于 origin/$REL_BRANCH 创建 $BRANCH（源 $DEV_BRANCH@$DEV_SHA）"
+  info "基于 origin/$REL_BRANCH 创建 ${BRANCH}（源 $DEV_BRANCH@$DEV_SHA）"
   git checkout -B "$BRANCH" "origin/$REL_BRANCH" --quiet
 
   if ! build_release_commit; then
@@ -309,7 +309,7 @@ cmd_direct() {
   fi
 
   git push origin "$REL_BRANCH"
-  ok "已直推 $REL_BRANCH（未经 review，请尽快补一次 PR 说明）"
+  ok "已直推 ${REL_BRANCH}（未经 review，请尽快补一次 PR 说明）"
   git checkout "$DEV_BRANCH" --quiet
 }
 
