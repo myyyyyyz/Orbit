@@ -8,7 +8,7 @@
 
 [![Tests](https://img.shields.io/badge/tests-407%20passed-22c55e)]()
 [![Frontend](https://img.shields.io/badge/frontend-36%20passed-22c55e)]()
-[![Python](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12-3b82f6)]()
+[![Python](https://img.shields.io/badge/python-3.11-3b82f6)]()
 [![License](https://img.shields.io/badge/license-MIT-8195ad)]()
 
 </div>

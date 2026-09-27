@@ -1,79 +1,122 @@
 name: CI
 
-# P1-2: 持续集成 — push / PR 自动运行测试 + lint
+# ─────────────────────────────────────────────────────────────
+# 分支模型（完整流程见 docs/RELEASE-PROCESS.md）
+#
+#   dev/optimize  开发分支 —— 唯一开发入口，push 即跑完整流水线
+#   master        上线分支 —— 内容 = dev/optimize − 开发资产（docs/、测试…）
+#                           只能经 PR + Code Review + 本流水线全绿后合入
+#
+# 注意：测试一律跑在 dev/optimize 的代码上。原因是 master 由
+# `scripts/sync-master.sh` 生成、**本身不含测试目录**，直接 pytest 会因
+# 「没收集到用例」而失败；而 master 又是 dev/optimize 的子集，
+# 所以验证 dev/optimize 等价于验证上线代码。
+# ─────────────────────────────────────────────────────────────
 on:
   push:
-    branches: [main]
+    branches: [dev/optimize]
   pull_request:
-    branches: [main]
+    branches: [master]
+
+# 同一分支连续推送时取消旧运行，避免排队浪费
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
+  # ── 门禁 1：后端测试 ───────────────────────────────────────
   backend-tests:
-    name: "Backend Tests (Python ${{ matrix.python-version }})"
+    name: Backend tests
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.10", "3.11", "3.12"]
-      fail-fast: false
-
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          # PR 到 master 时也只测 dev/optimize：见文件头注释
+          ref: ${{ github.event_name == 'pull_request' && 'dev/optimize' || github.ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          # 与 backend/Dockerfile 的 python:3.11-slim 保持一致：CI 测的就是线上跑的
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
 
       - name: Install dependencies
         working-directory: backend
         run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
 
-      - name: Lint with ruff
+      - name: Run pytest
         working-directory: backend
-        run: |
-          pip install ruff
-          ruff check app/ --ignore=E501,F841 || true   # 先不阻塞 CI
+        run: python -m pytest test/ -q --tb=short
 
-      - name: Run tests
-        working-directory: backend
-        run: python -m pytest test/ -v --tb=short
+  # ── 门禁 2：前端 lint / 类型 / 单测 / 构建 ─────────────────
+  frontend-checks:
+    name: Frontend checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && 'dev/optimize' || github.ref }}
 
-  # P2-4: 依赖安全扫描
-  dependency-scan:
-    name: "Dependency Security Scan"
+      - uses: actions/setup-node@v4
+        with:
+          # 与 frontend/Dockerfile 的 node:20-alpine 保持一致
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  # ── 门禁 3：上线分支内容校验（仅 PR 到 master）─────────────
+  release-sync:
+    name: Release sync check
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: dev/optimize
+
+      - name: Fetch release branch
+        run: git fetch --no-tags origin '+refs/heads/*:refs/remotes/origin/*'
+
+      - name: 校验 PR 内容恰好等于「dev/optimize − 排除清单」
+        env:
+          RELEASE_HEAD: ${{ github.event.pull_request.head.ref }}
+        run: bash scripts/sync-master.sh --verify "origin/$RELEASE_HEAD"
+
+  # ── 非门禁：依赖安全扫描（结果仅供参考，不阻塞合入）────────
+  dependency-scan:
+    name: Dependency scan (informational)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Run pip-audit
+      - name: pip-audit
         working-directory: backend
         run: |
-          pip install pip-audit
-          pip-audit -r requirements.txt --ignore-vuln GHSA-xxxx || true  # 先不阻塞 CI
-
-  frontend-tests:
-    name: "Frontend Tests"
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install dependencies
-        working-directory: frontend
-        run: npm ci
-
-      - name: Lint
-        working-directory: frontend
-        run: npm run lint 2>/dev/null || echo "No lint script defined"
-
-      - name: Build check
-        working-directory: frontend
-        run: npm run build 2>/dev/null || echo "Build check skipped"
+          python -m pip install pip-audit
+          python -m pip-audit -r requirements.txt

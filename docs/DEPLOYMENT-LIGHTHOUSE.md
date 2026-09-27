@@ -109,21 +109,21 @@ free -m; df -h /                     # 资源余量
 
 ### 更新代码（发布新版本）
 
-上线分支是 **`master`**，服务器只跟 `master`。发版分两步：
+上线分支是 **`master`**，服务器只跟 `master`；**`master` 不能直接 push**。
+完整流程见 [`docs/RELEASE-PROCESS.md`](./RELEASE-PROCESS.md)，速览：
 
-**① 本地：把开发分支同步为上线分支**
+**① 本地：生成 release 分支并发起 PR**
 
 ```bash
-# 在 dev/optimize 上提交完开发改动后
-bash scripts/sync-master.sh --push
+git switch dev/optimize          # 确认工作区干净
+bash scripts/sync-master.sh      # 生成 release/sync-<devsha> 并打印 PR 链接
 ```
 
-脚本把 `dev/optimize` 的内容整体同步到 `master`，剔除开发文档与测试脚本
-（清单见脚本内 `RELEASE_EXCLUDES`，唯一事实源），每次生成**一个** release 提交，
-并在提交前校验「差异恰好等于排除清单」——非排除项漏同步会直接中止。
-脚本幂等：dev 无新提交时重跑不会产生空提交。
+**② 在 GitHub 上开 PR → 等 CI 全绿 → Code Review → 合入 `master`**
 
-**② 服务器：拉取并重建**
+必须在 PR 上通过：`Backend tests`、`Frontend checks`、`Release sync check`。
+
+**③ 服务器：拉取并重建**
 
 ```bash
 cd /opt/orbit
@@ -133,9 +133,9 @@ docker compose up -d                    # 滚动重建变更的容器
 docker compose ps
 ```
 
-> 回滚：`git log --oneline master` 找到上一个 release 提交，执行
-> `git reset --hard <sha> && docker compose build && docker compose up -d`。
-> 本地另有 `backup/master-pre-release-sync` 标签，指向改造前的 master。
+> 回滚：**不要** `reset --hard` 篡改已上线历史，用 `git revert <sha>` 开 PR 反向恢复。
+> 紧急场景可用 `bash scripts/sync-master.sh --direct` 绕过门禁（需要手工确认）。
+> 本地标签 `backup/master-pre-release-sync` 指向改造前的 master。
 
 ### 重启 / 停止
 
