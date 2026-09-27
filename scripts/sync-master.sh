@@ -224,13 +224,24 @@ build_release_commit() {
     return 1
   fi
 
-  local DEV_SHA
+  local DEV_SHA AUTHOR_NAME AUTHOR_EMAIL
   DEV_SHA="$(git rev-parse --short "$DEV_BRANCH")"
-  git commit -q -m "release: 同步 $DEV_BRANCH@$DEV_SHA
+  # 本机可能没配 user.name/user.email（脚本内 commit 会报
+  # "unable to auto-detect email address"），退化为沿用 dev tip 的作者身份。
+  AUTHOR_NAME="$(git log -1 --format=%an "$DEV_BRANCH")"
+  AUTHOR_EMAIL="$(git log -1 --format=%ae "$DEV_BRANCH")"
+  git -c user.name="$AUTHOR_NAME" -c user.email="$AUTHOR_EMAIL" \
+    commit -q -m "release: 同步 $DEV_BRANCH@$DEV_SHA
 
 由 scripts/sync-master.sh 生成：内容 = $DEV_BRANCH 代码 − 开发文档与测试脚本。
-合入前必须通过 CI 与 Code Review。"
-  ok "release 提交 $(git rev-parse --short HEAD)"
+合入前必须通过 CI 与 Code Review。" \
+    || die "release 提交失败（git commit 非零退出）"
+  local NEW_SHA
+  NEW_SHA="$(git rev-parse --short HEAD)"
+  if [ "$NEW_SHA" = "$(git rev-parse --short 'HEAD^')" ]; then
+    die "release 提交未产生新对象，异常退出"
+  fi
+  ok "release 提交 $NEW_SHA（作者 $AUTHOR_NAME <$AUTHOR_EMAIL>）"
   return 0
 }
 
@@ -240,7 +251,9 @@ web_url() {
   url="$(git remote get-url origin)"
   url="${url%.git}"
   url="${url#git@}"
-  url="${url/:/\/}"
+  # 注意：不能写 ${url/:/\/}——双引号内 \/ 是字面反斜杠+斜杠（bash 3.2），
+  # 会产出 github.com\/user 这种坏链接。用 tr 替换最稳。
+  url="$(printf '%s' "$url" | tr ':' '/')"
   if [ "${url#http}" = "$url" ]; then
     url="https://$url"
   fi
@@ -272,6 +285,10 @@ cmd_pr() {
   # release/* 是一次性分支，覆盖它自己的旧版本是安全的（--force-with-lease 仍会
   # 拒绝覆盖别人的提交），这样同一个 dev 版本重复执行也不会因历史不同而推不上去。
   git push --force-with-lease origin "$BRANCH"
+
+  if [ "$(git rev-parse --short "$BRANCH")" = "$(git rev-parse --short "origin/$REL_BRANCH")" ]; then
+    die "$BRANCH 与 origin/$REL_BRANCH 完全相同——release 提交没有真实产生，拒绝发起空 PR"
+  fi
 
   local URL
   URL="$(web_url)"
