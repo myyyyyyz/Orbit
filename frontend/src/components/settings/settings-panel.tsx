@@ -64,13 +64,24 @@ function loadModels(): ModelConfig[] {
   }));
 }
 
+/** 状态指示图标。必须是模块级组件：在渲染函数里创建组件会导致每次渲染都换新类型。 */
+function StatusIcon({ ok }: { ok: boolean }) {
+  return ok ? (
+    <CheckCircle2 className="h-3.5 w-3.5 text-success" />
+  ) : (
+    <XCircle className="h-3.5 w-3.5 text-error" />
+  );
+}
+
 export function SettingsPanel() {
+  // 首屏即在拉取，故初始为 true（之前是 effect 里 setLoading(true)，
+  // 属于 effect 内同步 setState，违反 react-hooks/set-state-in-effect）
   const [health, setHealth] = useState<Record<string, string> | null>(null);
-  const [healthLoading, setHealthLoading] = useState(false);
+  const [healthLoading, setHealthLoading] = useState(true);
 
   // C4: 缓存命中率
   const [cacheStats, setCacheStats] = useState<CacheStats | null>(null);
-  const [cacheLoading, setCacheLoading] = useState(false);
+  const [cacheLoading, setCacheLoading] = useState(true);
   const [clearing, setClearing] = useState(false);
 
   const [models, setModels] = useState<ModelConfig[]>(loadModels);
@@ -132,9 +143,32 @@ export function SettingsPanel() {
     }
   };
 
+  // 首屏拉取：只在这里做「无同步 setState」的异步加载。
+  // checkHealth/refreshCacheStats 保留给手动刷新按钮（事件回调里同步 setState 是允许的）。
   useEffect(() => {
-    checkHealth();
-    refreshCacheStats();
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await system.health();
+        if (!cancelled) setHealth(res);
+      } catch {
+        if (!cancelled) setHealth({ status: "unreachable" });
+      } finally {
+        if (!cancelled) setHealthLoading(false);
+      }
+
+      try {
+        const stats = await system.cacheStats();
+        if (!cancelled) setCacheStats(stats);
+      } catch {
+        if (!cancelled) setCacheStats(null);
+      } finally {
+        if (!cancelled) setCacheLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const persist = useCallback((m: ModelConfig[]) => {
@@ -227,13 +261,6 @@ export function SettingsPanel() {
     await agents.deleteSchedule(id);
     await refreshSchedules();
   };
-
-  const StatusIcon = ({ ok }: { ok: boolean }) =>
-    ok ? (
-      <CheckCircle2 className="h-3.5 w-3.5 text-success" />
-    ) : (
-      <XCircle className="h-3.5 w-3.5 text-error" />
-    );
 
   return (
     <div className="flex h-full flex-col">

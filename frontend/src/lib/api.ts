@@ -1,3 +1,5 @@
+import { notifyLocalChange } from "@/lib/local-storage";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
 export { API_BASE };
 
@@ -30,6 +32,9 @@ function setStored(key: string, value: string | null) {
   if (typeof window === "undefined") return;
   if (value) localStorage.setItem(key, value);
   else localStorage.removeItem(key);
+  // 令牌刷新是在请求拦截层自动发生的，不走 React 状态；必须主动通知，
+  // 否则 useSyncExternalStore 订阅方（AuthProvider）拿到的仍是旧值。
+  notifyLocalChange();
 }
 
 export function getToken(): string | null {
