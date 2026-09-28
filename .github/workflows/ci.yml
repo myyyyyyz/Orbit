@@ -39,13 +39,15 @@ jobs:
           # 与 backend/Dockerfile 的 python:3.11-slim 保持一致：CI 测的就是线上跑的
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: backend/requirements.txt
+          cache-dependency-path: backend/requirements*.txt
 
       - name: Install dependencies
         working-directory: backend
+        # requirements.txt 只有运行时依赖，pytest 在 requirements-dev.txt 里。
+        # 早年 CI 只装前者，于是 `python -m pytest` 直接报 No module named pytest。
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-dev.txt
 
       - name: Run pytest
         working-directory: backend
