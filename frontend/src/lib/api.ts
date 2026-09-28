@@ -209,7 +209,9 @@ async function request<T>(
     throw new ApiError(
       extractErrorMessage(payload, `HTTP ${res.status}`),
       res.status,
-      res.headers.get("X-Request-ID") || undefined,
+      // 非标准/被 mock 的 Response 可能没有 headers，取不到就当没有 Request-ID，
+      // 不能让它把真正的错误信息盖掉（会变成 "Cannot read properties of undefined"）
+      res.headers?.get?.("X-Request-ID") || undefined,
     );
   }
 
