@@ -58,7 +58,10 @@ def test_plan_persists_initial_status_and_relative_folder_path(tmp_path):
 
     saved = get_run(plan.run_id, database_path=database_path, user_id=7)
     assert saved is not None
-    assert saved.status == "review_required"
+    # 契约变更：pdf_vision_v1 自带图片检测/OCR/视觉 LLM 分流，扫描件不再走
+    # 人工复核闸门，故新计划的初始状态是 planned（见 test_knowledge_agent_pipeline
+    # 的 test_pdf_no_longer_requires_review）。planned 仍可直接 approve。
+    assert saved.status == "planned"
     assert saved.status == plan.status
     assert saved.folder_path == "fixtures"
     assert saved.vector_store_writes == 0

@@ -159,7 +159,9 @@ def test_run_can_be_read_and_approved_without_vector_writes(tmp_path, monkeypatc
     approved = TestClient(app).post(f"/api/v1/knowledge/runs/{run_id}/approve")
 
     assert saved.status_code == 200
-    assert saved.json()["status"] == "review_required"
+    # pdf 摄取已统一走 pdf_vision_v1（内置图片检测/OCR/视觉分流），扫描件不再
+    # 触发人工复核，新计划状态为 planned；planned → approved 仍是合法迁移。
+    assert saved.json()["status"] == "planned"
     assert approved.status_code == 200
     assert approved.json()["status"] == "approved"
     assert approved.json()["vector_store_writes"] == 0

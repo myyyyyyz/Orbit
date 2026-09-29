@@ -152,7 +152,10 @@ def test_execute_approved_run_writes_only_staging_and_hands_off_to_evaluation(co
 
 
 def test_executor_failure_deletes_staging_and_marks_run_failed(context):
-    context.executors["pdf_ocr_review_v1"] = FailingExecutor("ocr_unavailable")
+    # 注入的失败必须落在本次实际使用的策略上，否则执行根本不会失败，
+    # 状态会停在 evaluating。契约变更后 fixtures 里的 pdf 统一走 pdf_vision_v1
+    # （pdf_ocr_review_v1 已不再是选择器会选中的策略）。
+    context.executors["pdf_vision_v1"] = FailingExecutor("ocr_unavailable")
     _approve(context)
 
     result = _execute(context)
