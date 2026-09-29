@@ -2,7 +2,14 @@ fastapi==0.115.0
 uvicorn[standard]==0.30.0
 python-multipart==0.0.12
 chromadb==0.5.5
-sentence-transformers==3.1.0
+# Embedding：chromadb 自带 ONNX Runtime 实现（all-MiniLM-L6-v2, 384 维）。
+# 原先用 sentence-transformers==3.1.0，它会拖进 torch + nvidia-*（3.2GB）+ triton（0.9GB），
+# 而线上是纯 CPU 机器 —— 那 4.1GB 一个字节都用不到。ONNX Runtime 跑的是**同一个模型**，
+# 向量维度不变，现有向量库无需重建。
+# onnxruntime / tokenizers / tqdm 本来就是 chromadb 0.5.5 的必需依赖，此处显式列出以免
+# 上游放宽依赖时静默消失。
+onnxruntime==1.19.2
+tokenizers==0.20.3
 pydantic==2.9.0
 pydantic-settings==2.6.0
 PyPDF2==3.0.1

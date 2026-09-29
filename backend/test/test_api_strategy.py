@@ -24,7 +24,10 @@ def test_get_strategy_structure(client):
         assert section in data
     assert data["chunk"]["size"] == 500
     assert data["retrieval"]["top_k"] == 5
-    assert data["_readonly"] == ["version"]
+    # embed 段只读：embedding 是单一实现（ONNX + all-MiniLM-L6-v2）
+    assert data["_readonly"] == ["version", "embed"]
+    assert data["embed"]["backend"] == "onnx"
+    assert "ollama_host" not in data["embed"]
     assert "version" in data
 
 
@@ -60,3 +63,27 @@ def test_patch_strategy_ignores_unset_sections(client):
     r = client.patch("/api/v1/knowledge/strategy", json={"retrieval": {"top_k": 6}})
     changed_fields = [c["field"] for c in r.json()["changes"]]
     assert changed_fields == ["retrieval.top_k"]
+
+
+def test_patch_strategy_accepts_flat_payload(client):
+    """前端 StrategyPanel 提交的是扁平对象，必须真正生效。
+
+    回归：此前顶层字段被 pydantic 静默忽略 —— 接口返回 200 + changes=[]，
+    用户看到"保存成功"，实际配置一字未改。
+    """
+    r = client.patch("/api/v1/knowledge/strategy", json={"chunk_size": 900, "top_k": 12})
+    assert r.status_code == 200
+    assert settings.rag.chunk.size == 900
+    assert settings.rag.retrieval.top_k == 12
+    changed = {c["field"] for c in r.json()["changes"]}
+    assert changed == {"chunk.size", "retrieval.top_k"}
+
+
+def test_patch_strategy_rejects_embed_change(client):
+    """embedding 是单一实现，不接受运行时换模型（换模型必须重建向量库）。"""
+    before = settings.rag.embed.model
+    r = client.patch("/api/v1/knowledge/strategy", json={"embed": {"embedding_model": "bge-m3"}})
+    # embed 已从 Schema 移除 → 该字段被忽略，不产生任何变更
+    assert r.status_code == 200
+    assert r.json()["changes"] == []
+    assert settings.rag.embed.model == before == "all-MiniLM-L6-v2"

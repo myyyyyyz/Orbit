@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Sliders, Save, RotateCcw, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
+import { Save, RotateCcw, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { strategy } from "@/lib/api";
 
@@ -36,7 +36,7 @@ const defaults: StrategyState = {
   chunk_size: 500,
   chunk_overlap: 50,
   top_k: 5,
-  embedding_model: "sentence-transformers",
+  embedding_model: "all-MiniLM-L6-v2",
   search_mode: "hybrid",
   rerank_enabled: false,
 };
@@ -64,7 +64,15 @@ export function StrategyPanel() {
     setSaving(true);
     setStatus("idle");
     try {
-      await updateStrategy(strategy);
+      // embedding_model 只在界面展示，不参与提交：Embedding 是单一实现，
+      // 换模型会改变向量维度、必须重建整个向量库，属于发版动作而非运行时配置。
+      await updateStrategy({
+        chunk_size: strategy.chunk_size,
+        chunk_overlap: strategy.chunk_overlap,
+        top_k: strategy.top_k,
+        search_mode: strategy.search_mode,
+        rerank_enabled: strategy.rerank_enabled,
+      });
       setStatus("success");
     } catch (e) {
       setStatus("error");
@@ -151,20 +159,19 @@ export function StrategyPanel() {
           <p className="mt-1 text-[11px] text-muted/60">每次查询返回的最相关文档片段数</p>
         </section>
 
-        {/* Embedding Model */}
+        {/* Embedding Model —— 只读：单一实现，换模型必须重建向量库 */}
         <section>
           <label className="text-sm font-medium block mb-2">Embedding 模型</label>
-          <select
-            value={strategy.embedding_model}
-            onChange={(e) => update("embedding_model", e.target.value)}
-            className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm
-                       focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer
-                       transition-[border-color,box-shadow] duration-200"
+          <div
+            className="flex items-center justify-between rounded-lg border border-border/50
+                       bg-surface/30 px-3 py-2"
           >
-            <option value="sentence-transformers">sentence-transformers (轻量本地)</option>
-            <option value="bge-m3">BGE-M3 (中文最优)</option>
-            <option value="openai">OpenAI text-embedding-3</option>
-          </select>
+            <span className="text-sm font-mono text-foreground">{strategy.embedding_model}</span>
+            <span className="text-[11px] text-muted/60">ONNX Runtime · 只读</span>
+          </div>
+          <p className="mt-1 text-[11px] text-muted/60">
+            384 维本地模型，向量库按此维度建立；更换模型需重建索引，故不在此处调整。
+          </p>
         </section>
 
         {/* Search Mode */}

@@ -24,6 +24,27 @@ def default_base_url_for(model: str) -> str:
     return "https://api.openai.com/v1/chat/completions"
 
 
+def resolve_model(*env_keys: str) -> str:
+    """按优先级从环境变量解析模型名，最终兜底 DEFAULT_LLM_MODEL。
+
+    **这是除 get_llm_config / get_fallback_llm_config 之外，唯一允许决定
+    "用哪个模型"的入口。** 任何需要模型名的地方都调用它，不要写模型名字面量。
+
+    为什么必须收敛到一处：线上端点是 DeepSeek，而代码里曾有 6 处把 OpenAI 的
+    "gpt-4o-mini" / "gpt-4o" 当兜底值写死（路由预设、LLM 分类、PII 锁定、
+    检索规划、视觉提取）。stream/service.py 的优先级是「前端指定 > 路由选择 >
+    环境变量」，于是路由一给出建议就把 "gpt-4o-mini" 发给了 DeepSeek → 400。
+
+    参数:
+        env_keys: 按优先级排列的环境变量名，例如 ("LLM_MODEL_VISION", "LLM_MODEL_FAST")
+    """
+    for key in env_keys:
+        value = (os.getenv(key) or "").strip()
+        if value:
+            return value
+    return (os.getenv("LLM_MODEL") or "").strip() or DEFAULT_LLM_MODEL
+
+
 def get_llm_config(model: str = None):
     """从环境变量读取 LLM 配置，根据模型名自动选择 API 地址。
 

@@ -1,47 +1,69 @@
 """Layer 1：规则引擎 — 快速过滤（微秒级），处理 80% 常见查询"""
 
-import os
 import re
 import logging
 from typing import Optional
+
+from ..llm.client import resolve_model
 
 logger = logging.getLogger(__name__)
 
 
 # ── 模型预设 ──────────────────────────────────────
+#
+# 兜底值一律取 DEFAULT_LLM_MODEL（client.py 里的唯一事实源），**不要写字面量**。
+# 历史缺陷：这里写死了 OpenAI 的 "gpt-4o-mini" / "gpt-4o"，而线上端点指向
+# DeepSeek。stream/service.py 的模型优先级是「前端指定 > 路由选择 > 环境变量」，
+# 于是路由一给建议就把 "gpt-4o-mini" 发给 DeepSeek → HTTP 400，
+# 用户侧表现为"路由阶段卡片显示 gpt-4o-mini，然后答案生成失败"。
+#
+# 想要分档用不同模型时，显式设置 LLM_MODEL_FAST / LLM_MODEL_BALANCED /
+# LLM_MODEL_STRONG；不设置则三档都等于主模型（单一厂商部署的实际情况）。
 
-MODEL_PRESETS = {
-    "fast": {
-        "model": os.getenv("LLM_MODEL_FAST", "gpt-4o-mini"),
-        "max_tokens": 500,
-        "temperature": 0.3,
-        "desc": "快模型：简单问答、定义查询、FAQ",
-    },
-    "balanced": {
-        "model": os.getenv("LLM_MODEL_BALANCED", "gpt-4o"),
-        "max_tokens": 1000,
-        "temperature": 0.3,
-        "desc": "中等模型：通用问答、文档总结",
-    },
-    "strong": {
-        "model": os.getenv("LLM_MODEL_STRONG", "gpt-4o"),
-        "max_tokens": 2000,
-        "temperature": 0.2,
-        "desc": "强模型：代码生成、多步推理、架构设计",
-    },
-    "unknown": {
-        "model": os.getenv("LLM_MODEL_FAST", "gpt-4o-mini"),
-        "max_tokens": 300,
-        "temperature": 0.2,
-        "desc": "未知意图：尝试从知识库检索回答",
-    },
-    "out_of_scope": {
-        "model": os.getenv("LLM_MODEL_FAST", "gpt-4o-mini"),
-        "max_tokens": 200,
-        "temperature": 0.1,
-        "desc": "领域外：礼貌拒绝 + 引导回知识库范围",
-    },
-}
+def build_model_presets() -> dict:
+    """构造模型预设表。
+
+    独立成函数（而非模块级字面量）是为了让测试能在受控环境变量下重建，
+    验证"未配置时各档兜底值 == DEFAULT_LLM_MODEL"这一不变量。
+    """
+    fast = resolve_model("LLM_MODEL_FAST")
+    balanced = resolve_model("LLM_MODEL_BALANCED")
+    strong = resolve_model("LLM_MODEL_STRONG")
+    return {
+        "fast": {
+            "model": fast,
+            "max_tokens": 500,
+            "temperature": 0.3,
+            "desc": "快模型：简单问答、定义查询、FAQ",
+        },
+        "balanced": {
+            "model": balanced,
+            "max_tokens": 1000,
+            "temperature": 0.3,
+            "desc": "中等模型：通用问答、文档总结",
+        },
+        "strong": {
+            "model": strong,
+            "max_tokens": 2000,
+            "temperature": 0.2,
+            "desc": "强模型：代码生成、多步推理、架构设计",
+        },
+        "unknown": {
+            "model": fast,
+            "max_tokens": 300,
+            "temperature": 0.2,
+            "desc": "未知意图：尝试从知识库检索回答",
+        },
+        "out_of_scope": {
+            "model": fast,
+            "max_tokens": 200,
+            "temperature": 0.1,
+            "desc": "领域外：礼貌拒绝 + 引导回知识库范围",
+        },
+    }
+
+
+MODEL_PRESETS = build_model_presets()
 
 
 # ── 意图体系（三层：domain → intent → task）──

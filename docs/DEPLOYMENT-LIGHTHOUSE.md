@@ -68,11 +68,11 @@ PIP_INDEX_URL=https://mirrors.tencentyun.com/pypi/simple/
 NPM_REGISTRY=https://registry.npmmirror.com
 ```
 
-### 2.3 HuggingFace 不可达（不修则服务起不来）
+### 2.3 HuggingFace 不可达（已不再影响后端）
 
-实测 `https://huggingface.co` 在该机器上**超时（HTTP 000）**，而 `https://hf-mirror.com` 正常（0.4s）。后端启动时 `preload_model()` 会加载 `all-MiniLM-L6-v2`，直连官方源必然失败。
+实测 `https://huggingface.co` 在该机器上**超时（HTTP 000）**。**2026-09-29 起此项已不再阻塞部署**：Embedding 换成了 chromadb 自带的 ONNX 实现，模型从 `chroma-onnx-models.s3.amazonaws.com` 下载（实测 HTTP 200），整条链路不经 HuggingFace，`HF_ENDPOINT` 已从 compose 中移除。
 
-compose 已为 backend 设置 `HF_ENDPOINT`（默认 `https://hf-mirror.com`）。
+若将来重新引入依赖 HF 的模型，记得把 `HF_ENDPOINT=https://hf-mirror.com` 加回 backend 的 environment。
 
 ### 2.4 2G 内存的前端构建风险
 
@@ -82,13 +82,12 @@ compose 已为 backend 设置 `HF_ENDPOINT`（默认 `https://hf-mirror.com`）�
 
 ### 2.5 镜像体积
 
-`orbit-backend` 约 **10.5GB** —— `sentence-transformers` 会拉取带 CUDA 依赖的 PyTorch。机器无 GPU，这些库不会被使用。若需瘦身，可在 Dockerfile 中改用 CPU-only 源：
+`orbit-backend` 约 **1.5GB**（2026-09-29 前为 10.5GB）。旧镜像大的唯一原因是 `sentence-transformers` 会拉取带 CUDA 依赖的 PyTorch：`nvidia-*` 3.2GB + `triton` 0.9GB，而机器无 GPU，这些库从未被使用。
 
-```dockerfile
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
-```
+现已改为 chromadb 内置的 ONNX Runtime 实现（同一个 `all-MiniLM-L6-v2`，384 维），整条 PyTorch 依赖链被移除，镜像与构建时间都大幅下降。
 
-（会显著减小镜像与构建时间，但需注意与 `sentence-transformers` 的版本兼容。）
+> 若哪天想换回 PyTorch 路线，注意不要直接 `pip install torch` —— 在 x86_64 上它默认带 CUDA 依赖，必须显式用
+> `pip install torch --index-url https://download.pytorch.org/whl/cpu`，否则会把 4GB 无用库塞进镜像。
 
 ---
 

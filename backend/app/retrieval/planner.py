@@ -20,6 +20,8 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from ..llm.client import default_base_url_for, resolve_model
+
 from ..search import search
 
 logger = logging.getLogger(__name__)
@@ -130,8 +132,10 @@ def plan_retrieval(question: str, user_id: Optional[int] = None,
     if not key:
         return _default_plan()
 
-    base_url = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1/chat/completions")
-    model = os.getenv("LLM_MODEL_FAST", os.getenv("LLM_MODEL", "gpt-4o-mini"))
+    # 兜底模型/端点取唯一事实源（见 router/rules.py 的说明）：写死 "gpt-4o-mini"
+    # 会在 DeepSeek 端点上必定 400，planner 静默降级成默认计划。
+    model = resolve_model("LLM_MODEL_FAST")
+    base_url = os.getenv("LLM_BASE_URL") or default_base_url_for(model)
 
     payload = json.dumps({
         "model": model,

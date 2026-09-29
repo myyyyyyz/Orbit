@@ -2,7 +2,13 @@
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.strategy import StrategyPatch, ChunkPatch, RetrievalPatch, _apply_section
+from app.schemas.strategy import (
+    StrategyPatch,
+    ChunkPatch,
+    RetrievalPatch,
+    _apply_section,
+    normalize_flat_patch,
+)
 
 
 def test_empty_patch_valid():
@@ -55,7 +61,47 @@ def test_strategy_patch_from_dict():
     patch = StrategyPatch(**{"chunk": {"chunk_size": 300}, "retrieval": {"top_k": 10}})
     assert patch.chunk.chunk_size == 300
     assert patch.retrieval.top_k == 10
-    assert patch.embed is None
+    # embed 段已移除：embedding 是单一实现，换模型必须重建向量库，不做运行时配置
+    assert not hasattr(patch, "embed")
+
+
+def test_normalize_flat_patch_nests_frontend_payload():
+    """前端 StrategyPanel 提交的是扁平对象，必须被归一到嵌套 section。
+
+    回归：此前顶层未知字段被 pydantic 静默忽略，保存请求返回 200 但什么都没变。
+    """
+    assert normalize_flat_patch({"chunk_size": 800, "top_k": 10}) == {
+        "chunk": {"chunk_size": 800},
+        "retrieval": {"top_k": 10},
+    }
+    # 已是嵌套结构的原样保留；两种形式混用时按字段合并
+    assert normalize_flat_patch({"retrieval": {"top_k": 3}, "search_mode": "hybrid"}) == {
+        "retrieval": {"search_mode": "hybrid", "top_k": 3},
+    }
+    # 未知字段透传，交由 pydantic 校验/忽略，不在此处报错
+    assert normalize_flat_patch({"nope": 1}) == {"nope": 1}
+
+
+def test_normalize_flat_patch_then_validate():
+    """归一化后的扁平 payload 必须能真正落到 settings 对象上（端到端最小复现）。"""
+    class _Chunk:
+        size = 500
+        overlap = 50
+
+    class _Retrieval:
+        top_k = 5
+
+    class _Target:
+        chunk = _Chunk()
+        retrieval = _Retrieval()
+
+    target = _Target()
+    validated = StrategyPatch(**normalize_flat_patch({"chunk_size": 900, "top_k": 7}))
+    _apply_section(target.chunk, validated.chunk)
+    _apply_section(target.retrieval, validated.retrieval)
+    assert target.chunk.size == 900
+    assert target.chunk.overlap == 50  # 未提交的字段不被覆盖
+    assert target.retrieval.top_k == 7
 
 
 def test_apply_section_field_alias_mapping():

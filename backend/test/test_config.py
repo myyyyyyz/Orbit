@@ -13,7 +13,7 @@ def test_compat_properties():
     assert settings.CHROMA_COLLECTION == settings.rag.storage.collection
     assert settings.EMBED_BACKEND == settings.rag.embed.backend
     assert settings.EMBED_MODEL == settings.rag.embed.model
-    assert settings.OLLAMA_HOST == settings.rag.embed.ollama_host
+    assert settings.EMBED_CACHE_DIR == settings.rag.embed.cache_dir
     assert settings.CHUNK_SIZE == settings.rag.chunk.size
     assert settings.CHUNK_OVERLAP == settings.rag.chunk.overlap
     assert settings.TOP_K == settings.rag.retrieval.top_k
@@ -24,7 +24,8 @@ def test_default_strategy_values():
     assert s.rag.chunk.method == "semantic"
     assert s.rag.chunk.size == 500
     assert s.rag.chunk.overlap == 50
-    assert s.rag.embed.backend == "sentence-transformers"
+    assert s.rag.embed.backend == "onnx"
+    assert s.rag.embed.model == "all-MiniLM-L6-v2"
     assert s.rag.storage.distance_metric == "cosine"
     assert s.rag.retrieval.top_k == 5
     assert s.rag.retrieval.score_threshold == 0.0
