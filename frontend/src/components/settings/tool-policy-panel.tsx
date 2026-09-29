@@ -33,7 +33,9 @@ export function ToolPolicyPanel() {
   const [approvalText, setApprovalText] = useState("");
   const [defaultAuto, setDefaultAuto] = useState<string[]>([]);
   const [isDefault, setIsDefault] = useState(true);
-  const [loading, setLoading] = useState(false);
+  // 首屏即在拉取，故初始为 true（以前是 effect 里 setLoading(true)，
+  // 属于 effect 内同步 setState，违反 react-hooks/set-state-in-effect）
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
@@ -55,9 +57,28 @@ export function ToolPolicyPanel() {
     }
   }, []);
 
+  // 首屏加载：异步获取后再 setState，避免在 effect 体内同步 setState。
+  // load(dir) 保留给「按项目目录重新加载」按钮（事件回调里同步 setState 允许）。
   useEffect(() => {
-    load("");
-  }, [load]);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const p = await agents.getToolPolicy("");
+        if (cancelled) return;
+        setAutoText(arrToLines(p.auto_commands));
+        setApprovalText(arrToLines(p.approval_commands));
+        setDefaultAuto(p.default_auto_commands || []);
+        setIsDefault(p.is_default);
+      } catch (e) {
+        if (!cancelled) setErr((e as Error).message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const save = async () => {
     setSaving(true);

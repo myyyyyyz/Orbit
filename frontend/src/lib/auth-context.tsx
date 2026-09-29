@@ -1,7 +1,8 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, useMemo, useCallback, type ReactNode } from "react";
+import { createContext, useContext, useMemo, useCallback, type ReactNode } from "react";
 import { auth as authApi, setTokens, clearTokens } from "@/lib/api";
+import { useLocalString, setLocalValue, removeLocalValue } from "@/lib/local-storage";
 
 interface AuthState {
   token: string | null;
@@ -22,43 +23,27 @@ const AuthContext = createContext<AuthState>({
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(null);
-  const [username, setUsername] = useState<string | null>(null);
-  const [role, setRole] = useState<string | null>(null);
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    const savedToken = localStorage.getItem("orbit_token");
-    const savedUser = localStorage.getItem("orbit_user");
-    const savedRole = localStorage.getItem("orbit_role");
-    if (savedToken) {
-      setToken(savedToken);
-      setUsername(savedUser);
-      setRole(savedRole);
-    }
-    setMounted(true);
-  }, []);
+  // 令牌/用户名/角色都住在 localStorage 里（外部数据源），用订阅读取而不是
+  // 「effect 里读 + setState」——后者既违反 react-hooks/set-state-in-effect，
+  // 又会在 api 层自动刷新令牌后与真实值失同步。
+  const token = useLocalString("orbit_token");
+  const username = useLocalString("orbit_user");
+  const role = useLocalString("orbit_role");
 
   const login = useCallback((user: string, t: string, refreshToken?: string, r?: string) => {
     // 令牌统一由 api 模块写入（access + refresh），避免各处漏存 refresh_token
     setTokens(t, refreshToken);
-    localStorage.setItem("orbit_user", user);
-    if (r) localStorage.setItem("orbit_role", r);
-    else localStorage.removeItem("orbit_role");
-    setToken(t);
-    setUsername(user);
-    setRole(r ?? null);
+    setLocalValue("orbit_user", user);
+    if (r) setLocalValue("orbit_role", r);
+    else removeLocalValue("orbit_role");
   }, []);
 
   const logout = useCallback(() => {
     // 通知后端立即撤销令牌（失败不阻塞本地清理）
     void authApi.logout();
     clearTokens();
-    localStorage.removeItem("orbit_user");
-    localStorage.removeItem("orbit_role");
-    setToken(null);
-    setUsername(null);
-    setRole(null);
+    removeLocalValue("orbit_user");
+    removeLocalValue("orbit_role");
   }, []);
 
   const value = useMemo(() => ({
@@ -69,10 +54,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     login,
     logout,
   }), [token, username, role, login, logout]);
-
-  if (!mounted) {
-    return <>{children}</>;
-  }
 
   return (
     <AuthContext.Provider value={value}>

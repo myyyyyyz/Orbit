@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
+import { useLocalFlag, setLocalValue } from "@/lib/local-storage";
 import { Sidebar } from "@/components/sidebar/sidebar";
 import { ChatInterface } from "@/components/chat/chat-interface";
 import { KnowledgeBasePanel } from "@/components/knowledge-base/kb-panel";
@@ -22,45 +23,26 @@ interface Conversation {
 export default function Home() {
   const [activeTab, setActiveTab] = useState<Tab>("chat");
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [showOnboarding, setShowOnboarding] = useState(false);
-  const [showAuth, setShowAuth] = useState(false);          // Bug #17: 接入登录/注册 UI
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversation, setActiveConversation] = useState<string | null>(null);
   const { isAuthenticated } = useAuth();
 
-  // localStorage 只能在浏览器访问（SSR/hydration 安全），故必须放在 effect 里
-  useEffect(() => {
-    // Bug #17: 未登录且未跳过时显示登录/注册页
-    if (!isAuthenticated && !localStorage.getItem("orbit_skip_login")) {
-      setShowAuth(true);
-      return;
-    }
-    const onboarded = localStorage.getItem("orbit_onboarded");
-    if (!onboarded) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- 客户端渲染模式下的正确位置
-      setShowOnboarding(true);
-    }
-  }, [isAuthenticated]);
+  // localStorage 是外部数据源：用订阅读取（SSR 首帧为 false，挂载后自动切真值）。
+  // 之前是「effect 里读 + setState」，会触发级联渲染并违反 React Compiler 规则。
+  const skipLogin = useLocalFlag("orbit_skip_login");
+  const onboarded = useLocalFlag("orbit_onboarded");
 
-  // 登录成功后关闭登录页，新用户走 onboarding
-  useEffect(() => {
-    if (isAuthenticated && showAuth) {
-      setShowAuth(false);
-      if (!localStorage.getItem("orbit_onboarded")) {
-        setShowOnboarding(true);
-      }
-    }
-  }, [isAuthenticated, showAuth]);
+  // 两个门都是派生状态，不需要各自的 state
+  const showAuth = !isAuthenticated && !skipLogin;
+  const showOnboarding = !showAuth && !onboarded;
 
   const handleSkipAuth = useCallback(() => {
-    localStorage.setItem("orbit_skip_login", "true");
-    setShowAuth(false);
+    setLocalValue("orbit_skip_login", "true");
   }, []);
 
   const handleOnboardingComplete = useCallback((role: string) => {
-    localStorage.setItem("orbit_onboarded", "true");
-    localStorage.setItem("orbit_role", role);
-    setShowOnboarding(false);
+    setLocalValue("orbit_onboarded", "true");
+    setLocalValue("orbit_role", role);
   }, []);
 
   const handleNewChat = useCallback(() => {
@@ -80,10 +62,11 @@ export default function Home() {
   }, [activeConversation]);
 
   // 未登录且未跳过 → 登录/注册页（可跳过匿名使用）
-  if (showAuth && !isAuthenticated) {
+  if (showAuth) {
     return <AuthForm onSkip={handleSkipAuth} />;
   }
 
+  // 首次使用（含跳过后匿名进入）→ 引导向导
   if (showOnboarding) {
     return <OnboardingWizard onComplete={handleOnboardingComplete} />;
   }
