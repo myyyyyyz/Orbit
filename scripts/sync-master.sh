@@ -128,9 +128,19 @@ is_excluded() {
 # ── 模式：--verify（只读，供 CI 使用）────────────────────────
 cmd_verify() {
   git rev-parse --verify --quiet "$VERIFY_REF" >/dev/null \
-    || die "看不到 ref：$VERIFY_REF"
-  git rev-parse --verify --quiet "refs/heads/$DEV_BRANCH" >/dev/null \
-    || die "本地不存在分支 $DEV_BRANCH"
+    || die "看不到 ref：${VERIFY_REF}"
+
+  # CI 里 checkout 的是 detached HEAD（actions/checkout ref: dev/optimize），
+  # 不存在名为 dev/optimize 的本地分支，只有 origin/dev/optimize 远程引用。
+  # 这里两者都接受，否则 release-sync job 会直接死在「本地不存在分支」。
+  if ! git rev-parse --verify --quiet "refs/heads/$DEV_BRANCH" >/dev/null; then
+    if git rev-parse --verify --quiet "refs/remotes/origin/$DEV_BRANCH" >/dev/null; then
+      info "本地无 $DEV_BRANCH 分支，改用 origin/$DEV_BRANCH"
+      DEV_BRANCH="origin/$DEV_BRANCH"
+    else
+      die "既没有本地分支 $DEV_BRANCH，也没有 origin/$DEV_BRANCH"
+    fi
+  fi
 
   # 比较基准取「release 提交里记录的那个 dev 版本」，而不是 dev 的当前 tip：
   # 否则只要 dev 又推进了提交，已经开着的发版 PR 就会被误判为红。
