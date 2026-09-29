@@ -19,13 +19,13 @@ export function SearchPanel() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
-  const queryRef = useRef(query);
-  queryRef.current = query;
   // IME 组字状态跟踪：中文/日文输入法拼音确认期间为 true
   const isComposingRef = useRef(false);
 
+  // 直接依赖 query，不再用 ref 镜像它——渲染期写 ref 会被 React Compiler 判违规，
+  // 而且 ref 镜像本来就是为了让 useCallback 保持空依赖，得不偿失。
   const handleSearch = useCallback(async () => {
-    const q = queryRef.current.trim();
+    const q = query.trim();
     if (!q) return;
 
     setLoading(true);
@@ -39,7 +39,7 @@ export function SearchPanel() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [query]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // 中文输入法 composing 期间（如拼音确认）不触发搜索，仅确认候选词

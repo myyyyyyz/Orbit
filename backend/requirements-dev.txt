@@ -1,0 +1,4 @@
+# 开发/测试依赖。上线镜像只装 requirements.txt，不装这些。
+# CI 的 Backend tests job 装这个文件（它必须包含 pytest —— 运行时依赖里没有）。
+-r requirements.txt
+pytest==8.3.3

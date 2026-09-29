@@ -1,3 +1,5 @@
+import { notifyLocalChange } from "@/lib/local-storage";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
 export { API_BASE };
 
@@ -30,6 +32,9 @@ function setStored(key: string, value: string | null) {
   if (typeof window === "undefined") return;
   if (value) localStorage.setItem(key, value);
   else localStorage.removeItem(key);
+  // 令牌刷新是在请求拦截层自动发生的，不走 React 状态；必须主动通知，
+  // 否则 useSyncExternalStore 订阅方（AuthProvider）拿到的仍是旧值。
+  notifyLocalChange();
 }
 
 export function getToken(): string | null {
@@ -204,7 +209,9 @@ async function request<T>(
     throw new ApiError(
       extractErrorMessage(payload, `HTTP ${res.status}`),
       res.status,
-      res.headers.get("X-Request-ID") || undefined,
+      // 非标准/被 mock 的 Response 可能没有 headers，取不到就当没有 Request-ID，
+      // 不能让它把真正的错误信息盖掉（会变成 "Cannot read properties of undefined"）
+      res.headers?.get?.("X-Request-ID") || undefined,
     );
   }
 
