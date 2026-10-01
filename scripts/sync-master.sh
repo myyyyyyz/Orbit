@@ -63,8 +63,7 @@ STATIC_EXCLUDES=(
   "backend/test"                # 后端 pytest 套件
   "frontend/test"               # 前端独立测试目录
   "frontend/src/test"           # 前端测试工具目录
-  "frontend/vitest.config.ts"   # 前端测试配置
-  "frontend/vitest.config.mts"
+  "frontend/vitest.config.mts"  # 前端测试配置（.ts 版本已合并进来并删除）
   ".playwright-cli"             # 本地浏览器自动化产物
   "login.yaml"                  # 本地调试用登录探针
   "main.png"
