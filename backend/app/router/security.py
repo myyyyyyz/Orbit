@@ -5,7 +5,10 @@
 检测到注入/越狱 → 保守参数 + 明确拒绝引导。
 """
 
+import os
 import re
+
+from ..llm.client import resolve_model
 
 # PII 模式（保守检测，避免误报普通数字）
 PII_PATTERNS = [
@@ -69,6 +72,10 @@ def security_scan(query: str) -> dict:
 
 
 def local_model_name() -> str:
-    """本地模型名（PII 不出站时锁定）。"""
-    import os
-    return os.getenv("LLM_MODEL_LOCAL", os.getenv("LLM_MODEL_FAST", "gpt-4o-mini"))
+    """本地模型名（PII 不出站时锁定）。
+
+    注意：命中 PII 时会**把路由锁定到这个模型**，所以它必须与已配置的端点
+    兼容。此前兜底写死 "gpt-4o-mini"，在 DeepSeek 端点上会导致该分支必定失败
+    （PII 场景反而比普通场景更容易报错，方向正好相反）。
+    """
+    return resolve_model("LLM_MODEL_LOCAL", "LLM_MODEL_FAST")

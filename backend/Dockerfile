@@ -7,10 +7,7 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     # 数据根目录（与 docker-compose 的 volume 挂载点保持一致）
-    DATA_DIR=/app/data \
-    # sentence-transformers 模型缓存落在数据卷，避免每次重建镜像重新下载
-    HF_HOME=/app/data/.cache/huggingface \
-    SENTENCE_TRANSFORMERS_HOME=/app/data/.cache/sentence-transformers
+    DATA_DIR=/app/data
 
 WORKDIR /app
 
@@ -36,6 +33,7 @@ COPY . .
 
 # 数据目录 + 非 root 用户（容器逃逸后无 root 权限）
 RUN mkdir -p /app/data/chroma_db /app/data/uploads /app/data/memory /app/knowledge \
+    /app/data/.cache/chroma/onnx_models \
     && useradd -m -u 1000 orbit \
     && chown -R orbit:orbit /app
 

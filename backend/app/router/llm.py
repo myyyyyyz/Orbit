@@ -5,6 +5,8 @@ import os
 import urllib.request
 import logging
 
+from ..llm.client import default_base_url_for, resolve_model
+
 logger = logging.getLogger(__name__)
 
 
@@ -14,7 +16,9 @@ def _llm_classify(query: str) -> tuple[str, float, str]:
     仅在前两层都不确定时才调用，此时用最便宜的模型。
     """
     api_key = os.getenv("LLM_API_KEY", "")
-    base_url = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1/chat/completions")
+    # 兜底模型/端点一律取唯一事实源，不写字面量（见 rules.py 的说明）
+    model = resolve_model("LLM_MODEL_FAST")
+    base_url = os.getenv("LLM_BASE_URL") or default_base_url_for(model)
 
     if not api_key:
         return "balanced", 0.3, "fallback_balanced"
@@ -37,7 +41,7 @@ def _llm_classify(query: str) -> tuple[str, float, str]:
 tier 规则：definition/list/howto→fast, code_gen/analyze/debug→strong, 其他→balanced"""
 
     payload = json.dumps({
-        "model": os.getenv("LLM_MODEL_FAST", "gpt-4o-mini"),
+        "model": model,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": query},

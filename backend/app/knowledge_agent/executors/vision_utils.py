@@ -16,6 +16,8 @@ import os
 import urllib.request
 from typing import Optional
 
+from ...llm.client import default_base_url_for, resolve_model
+
 logger = logging.getLogger(__name__)
 
 # ---- 可调阈值（可用 env 覆盖）----
@@ -141,8 +143,10 @@ def vision_describe(image_bytes: bytes, prompt: Optional[str] = None) -> Optiona
     api_key = os.getenv("LLM_API_KEY", "")
     if not api_key:
         return None
-    base_url = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1/chat/completions")
-    model = os.getenv("LLM_MODEL_VISION") or os.getenv("LLM_MODEL_FAST", "gpt-4o-mini")
+    # 兜底取唯一事实源（见 router/rules.py 的说明）：写死 "gpt-4o-mini" 会让
+    # 视觉提取在 DeepSeek 端点上静默返回 None，PDF 内嵌图直接变成无描述。
+    model = resolve_model("LLM_MODEL_VISION", "LLM_MODEL_FAST")
+    base_url = os.getenv("LLM_BASE_URL") or default_base_url_for(model)
     prompt = prompt or (
         "请详细描述这张图片的内容，并尽可能完整地提取其中的全部文字"
         "（保留原有结构与排版）。如果图片是图表/流程图/截图，请说明其含义。"

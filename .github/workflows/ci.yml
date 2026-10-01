@@ -17,6 +17,8 @@ on:
     branches: [dev/optimize]
   pull_request:
     branches: [master]
+  # 手动补跑：工作流曾被禁用时，push 事件不会被补发，只能靠这里重跑
+  workflow_dispatch:
 
 # 同一分支连续推送时取消旧运行，避免排队浪费
 concurrency:
