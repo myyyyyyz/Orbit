@@ -68,26 +68,36 @@ class ChunkStrategy:
 
 
 class EmbedStrategy:
-    """Embedding 策略"""
+    """Embedding 策略 —— 单一实现，不做后端可选。
 
-    # 后端
-    # "sentence-transformers": 轻量本地，适合英文 / 小规模
-    # "ollama": BGE-M3 等模型，中文最优，需本地运行 Ollama
-    # "openai": OpenAI text-embedding-3-large，最强但需 API key
-    backend: Literal["sentence-transformers", "ollama", "openai"] = "sentence-transformers"
+    历史上这里声明了三个后端（sentence-transformers / ollama / openai），
+    但只有第一个真正存在实现：embed/core.py 只判断 `== "ollama"`，其余值
+    **全部**落到 SentenceTransformerBackend —— 于是 `EMBED_BACKEND=openai`
+    既不报错也不生效，只是静默用了本地小模型。这与项目「不降级假装成功」
+    的原则相悖，因此直接收敛为一个后端。
 
-    # 模型名
-    # sentence-transformers: "all-MiniLM-L6-v2" (384维, 轻量) / "BAAI/bge-large-zh-v1.5" (1024维, 中文)
-    # ollama: "bge-m3" (1024维, 多语言最优)
-    # openai: "text-embedding-3-large"
+    现在统一为 chromadb 自带的 ONNX Runtime 实现，跑的还是同一个模型
+    `all-MiniLM-L6-v2`（384 维）—— 因此**现有向量库无需重建**，
+    但不再需要 sentence-transformers/torch，镜像少约 5GB
+    （torch 会拖进 nvidia-* 3.2GB + triton 0.9GB，而线上机器无 GPU）。
+    """
+
+    # 后端固定为 chromadb 内置的 ONNX Runtime 实现（唯一取值）
+    backend: Literal["onnx"] = "onnx"
+
+    # 模型固定为 chromadb ONNX 包内自带的 all-MiniLM-L6-v2（384 维）。
+    # 该字段仅用于对外展示；模型实体由 ONNX 后端固定加载，不可通过配置替换。
     model: str = "all-MiniLM-L6-v2"
 
-    # 是否做向量归一化
-    # cosine 检索时必须为 True
+    # 是否做向量归一化（cosine 检索要求归一化）
+    # ONNX 后端内部已做 L2 归一化，此项保留作为策略语义标记
     normalize: bool = True
 
-    # Ollama host（仅 backend=ollama 时有效）
-    ollama_host: str = "http://localhost:11434"
+    # ONNX 模型缓存目录（→ <DATA_DIR>/.cache/...，落在数据卷）
+    # 必须指向数据卷：容器可写层是临时的，否则每次重建镜像都要重新下载 80MB
+    cache_dir: str = os.path.join(
+        DATA_DIR, ".cache", "chroma", "onnx_models", "all-MiniLM-L6-v2"
+    )
 
 
 class StorageStrategy:
@@ -205,8 +215,8 @@ class Settings:
         return self.rag.embed.model
 
     @property
-    def OLLAMA_HOST(self) -> str:
-        return self.rag.embed.ollama_host
+    def EMBED_CACHE_DIR(self) -> str:
+        return self.rag.embed.cache_dir
 
     @property
     def CHUNK_SIZE(self) -> int:

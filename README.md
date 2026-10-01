@@ -107,7 +107,7 @@ Orbit/
 │   │   ├── config.py          # RAG 四大策略 + 启动时配置校验
 │   │   ├── logging_config.py  # structlog 结构化日志
 │   │   ├── chunk/             # 文本切割（语义段落 + 长句重叠）
-│   │   ├── embed/             # 向量化（sentence-transformers / Ollama / OpenAI）
+│   │   ├── embed/             # 向量化（chromadb ONNX Runtime · all-MiniLM-L6-v2）
 │   │   ├── store/             # ChromaDB（多租户 Collection 隔离）
 │   │   ├── search/            # 语义检索（Active Index 版本解析）
 │   │   ├── cache/             # 语义缓存（Faiss 加速 + 自适应阈值）
@@ -322,7 +322,7 @@ curl -X POST http://localhost:8001/api/v1/knowledge/plan-folder \
 | 后端 | FastAPI · Python 3.10+ · Pydantic v2 · Uvicorn |
 | 向量库 | ChromaDB（HNSW + cosine） |
 | 关系库 | SQLite + Alembic |
-| Embedding | sentence-transformers / Ollama / OpenAI |
+| Embedding | chromadb 内置 ONNX Runtime（all-MiniLM-L6-v2, 384 维） |
 | 可靠性 | tenacity · pybreaker |
 | 可观测性 | structlog · Prometheus · Sentry |
 | 测试 | pytest · Vitest · Testing Library |

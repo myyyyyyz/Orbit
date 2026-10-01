@@ -4,7 +4,7 @@ from datetime import datetime
 from fastapi import APIRouter, Body, HTTPException
 
 from ..config import settings, RAGStrategy
-from ..schemas.strategy import StrategyPatch, _apply_section
+from ..schemas.strategy import StrategyPatch, _apply_section, normalize_flat_patch
 
 router = APIRouter(prefix="/api/v1/knowledge", tags=["strategy"])
 
@@ -23,10 +23,11 @@ def _strategy_to_dict() -> dict:
             "table_preserve": s.chunk.table_preserve,
         },
         "embed": {
+            # Embedding 是单一实现（ONNX Runtime + all-MiniLM-L6-v2），
+            # 不接受 PATCH —— 换模型必须重建向量库，属于发版动作而非运行时调参。
             "backend": s.embed.backend,
             "model": s.embed.model,
             "normalize": s.embed.normalize,
-            "ollama_host": s.embed.ollama_host,
         },
         "storage": {
             "distance_metric": s.storage.distance_metric,
@@ -49,7 +50,8 @@ def _strategy_to_dict() -> dict:
 
 
 def _apply_strategy_patch(strategy: RAGStrategy, patch: dict):
-    validated = StrategyPatch(**patch)
+    # 兼容前端扁平结构（chunk_size / top_k / search_mode ...）→ 嵌套 section
+    validated = StrategyPatch(**normalize_flat_patch(patch))
     apply_map = {
         "chunk": strategy.chunk,
         "embed": strategy.embed,
@@ -79,13 +81,13 @@ def _diff_strategy(before: dict, after: dict) -> list:
 @router.get("/strategy")
 def api_get_strategy():
     s = _strategy_to_dict()
-    s["_defaults_note"] = "所有字段均有默认值。PATCH 可部分更新。embed 大类变更需用户确认。"
-    s["_readonly"] = ["version"]
+    s["_defaults_note"] = "所有字段均有默认值。PATCH 可部分更新。embed 段只读（单一实现）。"
+    s["_readonly"] = ["version", "embed"]
     s["_auto_apply_fields"] = [
         "retrieval.*", "chunk.method", "chunk.overlap", "chunk.min_size", "storage.hnsw_ef_search",
     ]
     s["_requires_confirm_fields"] = [
-        "embed.*", "chunk.size", "chunk.parent_child_enabled", "storage.distance_metric",
+        "chunk.size", "chunk.parent_child_enabled", "storage.distance_metric",
     ]
     return s
 

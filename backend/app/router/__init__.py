@@ -17,6 +17,7 @@ llm（LLM 分类）、service（统一入口），此处仅做导出。
 from .models import RouteDecision
 from .rules import (
     MODEL_PRESETS,
+    build_model_presets,
     INTENT_TAXONOMY,
     SIMPLE_PATTERNS,
     COMPLEX_PATTERNS,
@@ -39,6 +40,7 @@ from .plugins import RegexRouter, SemanticRouter, LLMRouter
 __all__ = [
     "RouteDecision",
     "MODEL_PRESETS",
+    "build_model_presets",
     "INTENT_TAXONOMY",
     "SIMPLE_PATTERNS",
     "COMPLEX_PATTERNS",
