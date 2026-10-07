@@ -5,9 +5,10 @@ from datetime import datetime
 from app.config import settings
 
 
-def _memory_dir():
-    # 与 api/logos.py 一致：Path(settings.UPLOAD_DIR).parent / "memory"
-    return os.path.join(os.path.dirname(settings.UPLOAD_DIR), "memory")
+def _memory_dir(scope: str = "anon"):
+    # 与 api/logos.py 一致：<UPLOAD_DIR 的父目录>/memory/users/{scope}
+    # 按用户分目录（未登录为 "anon"），避免甲的对话总结被乙读到。
+    return os.path.join(os.path.dirname(settings.UPLOAD_DIR), "memory", "users", scope)
 
 
 def test_logos_writes_memory_file(client):
@@ -34,6 +35,32 @@ def test_logos_appends_second_conversation(client):
     today = datetime.now().strftime("%Y-%m-%d")
     content = open(os.path.join(_memory_dir(), f"{today}.md"), encoding="utf-8").read()
     assert "第 2 次对话" in content or "第 3 次对话" in content  # 取决于同日期已有记录数
+
+
+def test_logos_isolates_per_user(client, auth_headers, auth_token):
+    """登录用户的对话总结写入自己的目录，不落进匿名目录。
+
+    回归：此前所有用户（含匿名）都追加到同一个 memory/YYYY-MM-DD.md。
+    """
+    from app.middleware.auth import verify_access_token
+    user_id = verify_access_token(auth_token)["user_id"]
+
+    r = client.post(
+        "/api/v1/knowledge/logos",
+        json={"conversation": "用户：私有对话\n助手：已记录"},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    scoped_file = os.path.join(_memory_dir(f"user_{user_id}"), f"{today}.md")
+    assert os.path.exists(scoped_file), "登录用户的总结应落在自己的目录"
+    assert "私有对话" in open(scoped_file, encoding="utf-8").read()
+
+    # 该内容不得出现在匿名目录里
+    anon_file = os.path.join(_memory_dir("anon"), f"{today}.md")
+    if os.path.exists(anon_file):
+        assert "私有对话" not in open(anon_file, encoding="utf-8").read()
 
 
 def test_logos_empty_conversation(client):

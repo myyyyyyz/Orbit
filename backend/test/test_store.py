@@ -1,7 +1,7 @@
 """store/ — ChromaDB 存储模块测试（临时目录隔离）"""
 import uuid
 
-from app.store import get_client, get_collection, add_documents, delete_by_source, get_stats
+from app.store import collection_name, get_client, get_collection, add_documents, delete_by_source, get_stats
 from app.config import settings
 
 
@@ -18,12 +18,26 @@ def test_client_uses_temp_persist_dir():
     assert "orbit_test_" in settings.CHROMA_PERSIST_DIR
 
 
-def test_get_collection_global_and_user_scoped():
-    global_col = get_collection(None)
+def test_anon_collection_never_falls_back_to_global():
+    """匿名（user_id=None）必须落在独立沙箱，**绝不能**是全局 `documents` 库。
+
+    回归：历史实现 `f"user_{user_id}" if user_id else settings.CHROMA_COLLECTION`
+    会让所有未登录访客共享全局 collection —— 任意匿名访客可读写、并删除
+    他人上传的内容。
+    """
+    assert collection_name(None) == settings.ANON_COLLECTION
+    assert collection_name(None) != settings.CHROMA_COLLECTION
+    assert collection_name(42) == "user_42"
+    assert collection_name(42) != settings.ANON_COLLECTION
+
+
+def test_get_collection_anon_and_user_scoped():
+    anon_col = get_collection(None)
     user_col = get_collection(42)
-    assert global_col.name == settings.CHROMA_COLLECTION
+    assert anon_col.name == settings.ANON_COLLECTION
+    assert anon_col.name != settings.CHROMA_COLLECTION
     assert user_col.name == "user_42"
-    assert global_col.name != user_col.name
+    assert anon_col.name != user_col.name
 
 
 def test_add_documents_empty():
@@ -66,12 +80,12 @@ def test_user_collection_isolation():
     add_documents([_doc("用户2的私有文档", source)], user_id=2)
     assert get_collection(1).count() == 1
     assert get_collection(2).count() == 1
-    assert get_collection(None).count() == 0  # 全局库无数据
+    assert get_collection(None).count() == 0  # 匿名沙箱与用户库互不相通
 
 
 def test_get_stats():
     stats = get_stats()
-    assert stats["collection"] == settings.CHROMA_COLLECTION
+    assert stats["collection"] == settings.ANON_COLLECTION
     assert "total_chunks" in stats
     assert "orbit_test_" in stats["persist_dir"]
 

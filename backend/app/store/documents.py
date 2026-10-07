@@ -5,14 +5,14 @@ from typing import Optional
 
 from ..config import settings
 from ..embed import encode
-from .client import get_collection
+from .client import collection_name, get_collection
 
 
 def add_documents(documents: list[dict], user_id: Optional[int] = None) -> int:
     """
     批量添加文档到向量库。
     - documents: [{"text": str, "metadata": dict}, ...]
-    - user_id: 可选，写入到专属 Collection
+    - user_id: 可选，写入到专属 Collection；为 None 时写入匿名沙箱（非全局库）
     返回添加的 chunk 数量
     """
     if not documents:
@@ -37,8 +37,7 @@ def add_documents(documents: list[dict], user_id: Optional[int] = None) -> int:
 
     # 失效 count 缓存（lazy import 避免循环依赖）
     from ..search import _invalidate_count_cache
-    collection_name = f"user_{user_id}" if user_id else settings.CHROMA_COLLECTION
-    _invalidate_count_cache(collection_name)
+    _invalidate_count_cache(collection_name(user_id))
 
     return len(documents)
 
@@ -52,16 +51,14 @@ def delete_by_source(source: str, user_id: Optional[int] = None):
 
     # 失效 count 缓存（lazy import 避免循环依赖）
     from ..search import _invalidate_count_cache
-    collection_name = f"user_{user_id}" if user_id else settings.CHROMA_COLLECTION
-    _invalidate_count_cache(collection_name)
+    _invalidate_count_cache(collection_name(user_id))
 
 
 def get_stats(user_id: Optional[int] = None) -> dict:
     """获取知识库统计信息"""
     collection = get_collection(user_id)
-    name = f"user_{user_id}" if user_id else settings.CHROMA_COLLECTION
     return {
-        "collection": name,
+        "collection": collection_name(user_id),
         "total_chunks": collection.count(),
         "persist_dir": settings.CHROMA_PERSIST_DIR,
     }

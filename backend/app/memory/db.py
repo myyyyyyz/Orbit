@@ -2,10 +2,14 @@
 
 import os
 
+from ..config import DATA_DIR
 from ..sqlite_utils import connect as _sqlite_connect
 
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "memory.db")
+# 记忆库必须落在数据目录（生产为挂载卷 /app/data），否则容器重建即丢。
+# 历史实现硬编码 `backend/memory.db`（相对 __file__），在容器里解析成
+# `/app/memory.db`——而数据卷只挂了 `/app/data`，于是记忆库不在卷内。
+DB_PATH = os.path.join(DATA_DIR, "memory.db")
 
 
 def _get_db():

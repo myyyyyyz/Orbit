@@ -16,10 +16,19 @@ from ..generate import generate_answer
 from ..router import route_model
 from ..cache import get as cache_get, put as cache_put, purge_user as cache_purge_user
 from ..stream import stream_ask
-from ..middleware.auth import get_optional_user
+from ..middleware.auth import get_current_user, get_optional_user
 from ..rate_limit import limiter
 
 router = APIRouter(prefix="/api/v1/knowledge", tags=["knowledge"])
+
+
+# ── 鉴权口径 ─────────────────────────────────────────────
+# 读类端点（stats/search/context/ask）保留 get_optional_user：未登录访客仍可
+# 体验检索与问答，其数据落在独立的匿名沙箱（settings.ANON_COLLECTION），
+# 不会触达任何登录用户的 Collection。
+# 写类端点（upload/upload-text/delete）一律要求登录：此前匿名写入的是**全局
+# 共享** Collection（"documents"），导致任意未登录访客都能写入、并删除他人
+# 上传的内容。写入是持久化副作用，不能以"体验"为名开放给匿名。
 
 
 def _invalidate_user_cache(user_id) -> None:
@@ -54,7 +63,7 @@ def api_supported_types():
 async def api_upload(
     request: Request,
     file: UploadFile = File(...),
-    current_user: Optional[dict] = Depends(get_optional_user),
+    current_user: dict = Depends(get_current_user),
 ):
     if not file.filename:
         raise HTTPException(400, "文件名不能为空")
@@ -90,13 +99,13 @@ async def api_upload(
     if not chunks:
         raise HTTPException(500, "文本切割失败")
 
-    user_id = current_user["user_id"] if current_user else None
+    user_id = current_user["user_id"]
     # 切片 → embedding → 写库同样是同步阻塞链路，统一移出事件循环
     count = await asyncio.to_thread(add_documents, chunks, user_id)
     _invalidate_user_cache(user_id)
     return {
         "status": "ok", "filename": safe_filename, "file_type": file_type,
-        "char_count": len(text), "chunks": count, "user_scoped": user_id is not None,
+        "char_count": len(text), "chunks": count, "user_scoped": True,
         "message": f"已索引 {safe_filename}（{count} 个片段）",
     }
 
@@ -107,7 +116,7 @@ async def api_upload_text(
     request: Request,
     text: str = Query(..., description="要索引的文本内容"),
     source: str = Query("manual", description="来源标识"),
-    current_user: Optional[dict] = Depends(get_optional_user),
+    current_user: dict = Depends(get_current_user),
 ):
     if not text or not text.strip():
         raise HTTPException(400, "文本内容不能为空")
@@ -115,10 +124,10 @@ async def api_upload_text(
         chunk_text, text,
         metadata={"source": source, "file_type": "text", "char_count": len(text)},
     )
-    user_id = current_user["user_id"] if current_user else None
+    user_id = current_user["user_id"]
     count = await asyncio.to_thread(add_documents, chunks, user_id)
     _invalidate_user_cache(user_id)
-    return {"status": "ok", "source": source, "char_count": len(text), "chunks": count, "user_scoped": user_id is not None}
+    return {"status": "ok", "source": source, "char_count": len(text), "chunks": count, "user_scoped": True}
 
 
 @router.get("/search")
@@ -137,9 +146,10 @@ def api_search(
 @router.delete("/source")
 def api_delete_source(
     source: str = Query(..., description="要删除的文档来源名称"),
-    current_user: Optional[dict] = Depends(get_optional_user),
+    current_user: dict = Depends(get_current_user),
 ):
-    user_id = current_user["user_id"] if current_user else None
+    # 删除是破坏性操作：必须登录，且只能删自己 Collection 里的内容
+    user_id = current_user["user_id"]
     delete_by_source(source, user_id)
     _invalidate_user_cache(user_id)
     return {"status": "ok", "source": source, "message": f"已删除 {source} 的索引"}
@@ -198,7 +208,10 @@ def api_ask(request: Request, body: dict = Body(...), current_user: Optional[dic
 
     user_api_key = request.headers.get("X-API-Key") or None
     user_model = request.headers.get("X-LLM-Model") or route.model
-    result = generate_answer(question, chunks, body.get("history", []), model=user_model, api_key=user_api_key)
+    result = generate_answer(
+        question, chunks, body.get("history", []),
+        model=user_model, api_key=user_api_key, user_id=user_id,
+    )
     cache_put(
         question, result["answer"], result["sources"], result["model"],
         namespace=cache_namespace,

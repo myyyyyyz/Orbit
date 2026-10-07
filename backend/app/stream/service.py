@@ -204,6 +204,11 @@ def stream_ask(question: str, top_k: int = None, user_id: int = None,
         # 存入缓存（必须带 namespace，否则跨租户串味）
         cache_put(question, full_answer, sources, final_model, namespace=cache_ns)
 
+        # 注：流式路径暂不记录 token 用量——上游 SSE chunk 默认不返回 usage，
+        # 需要请求体带 stream_options={"include_usage": true} 才能拿到，而该参数
+        # 并非所有 OpenAI 兼容厂商都支持（不支持的会直接 400 打挂请求）。
+        # 待确认部署厂商支持后开启；此处不做静默估算，以免污染用量口径。
+
         logger.info(
             "stream_generate_success",
             model=final_model,

@@ -96,8 +96,12 @@ def api_logos_summarize(body: dict = Body(...), current_user: Optional[dict] = D
         except Exception as e:
             logger.warning("conversation_summary 落库失败: %s", e)
 
-    # 写入 data/memory/YYYY-MM-DD.md
-    memory_dir = Path(settings.UPLOAD_DIR).parent / "memory"
+    # 写入 <DATA_DIR>/memory/users/{scope}/YYYY-MM-DD.md
+    # 按用户分目录：此前所有用户（含匿名）都追加到同一个 memory/YYYY-MM-DD.md，
+    # 导致甲的对话总结乙能读到，且"第 N 次对话"计数也是全局共享的。
+    memory_root = Path(settings.UPLOAD_DIR).parent / "memory" / "users"
+    scope = f"user_{user_id}" if user_id else "anon"
+    memory_dir = memory_root / scope
     memory_dir.mkdir(parents=True, exist_ok=True)
     today = datetime.now().strftime("%Y-%m-%d")
     now = datetime.now().strftime("%H:%M:%S")

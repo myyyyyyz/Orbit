@@ -175,8 +175,16 @@ def add_loop_event(loop_id: int, agent: str, event_type: str, payload: dict) -> 
         conn.close()
 
 
-def list_loop_groups(user_id: Optional[int] = None) -> list[dict]:
-    """列出 loop 组；若提供 user_id 则仅返回该用户。"""
+def list_loop_groups(user_id: Optional[int] = None, *, include_all: bool = False) -> list[dict]:
+    """列出 loop 组。
+
+    - user_id 非空：仅返回该用户的 loop
+    - user_id 为空且 include_all=False：仅返回**匿名**（user_id IS NULL）的 loop
+    - include_all=True：不过滤（仅供系统级/运维调用）
+
+    历史缺陷：匿名调用时走 `SELECT * FROM loop_groups`，把**所有用户**的 loop
+    列表返回给未登录访客（任务描述、项目目录等全曝光）。默认必须是"只看自己的"。
+    """
     init_loop_db()
     conn = _get_db()
     try:
@@ -184,8 +192,12 @@ def list_loop_groups(user_id: Optional[int] = None) -> list[dict]:
             rows = conn.execute(
                 "SELECT * FROM loop_groups WHERE user_id = ? ORDER BY created_at DESC", (user_id,)
             ).fetchall()
-        else:
+        elif include_all:
             rows = conn.execute("SELECT * FROM loop_groups ORDER BY created_at DESC").fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM loop_groups WHERE user_id IS NULL ORDER BY created_at DESC"
+            ).fetchall()
         return [dict(r) for r in rows]
     finally:
         conn.close()

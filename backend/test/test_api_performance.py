@@ -2,8 +2,13 @@
 from app.router import MODEL_PRESETS
 
 
-def test_cache_stats(client):
-    r = client.get("/api/v1/knowledge/cache/stats")
+def test_cache_stats_requires_login(client):
+    """缓存统计需登录（匿名可读会泄露全站缓存规模与命中率）。"""
+    assert client.get("/api/v1/knowledge/cache/stats").status_code == 401
+
+
+def test_cache_stats(client, auth_headers):
+    r = client.get("/api/v1/knowledge/cache/stats", headers=auth_headers)
     assert r.status_code == 200
     data = r.json()
     # C4: 新增命中率指标 hit_count / miss_count / hit_rate / history
@@ -21,11 +26,18 @@ def test_cache_stats(client):
     assert len(data["history"]) <= 20  # 趋势采样上限
 
 
-def test_cache_clear(client):
-    r = client.delete("/api/v1/knowledge/cache")
+def test_cache_clear_requires_admin(client, auth_headers):
+    """清空全局缓存是管理操作：匿名 401、普通用户 403。"""
+    assert client.delete("/api/v1/knowledge/cache").status_code == 401
+    assert client.delete("/api/v1/knowledge/cache", headers=auth_headers).status_code == 403
+
+
+def test_cache_clear(client, admin_headers):
+    r = client.delete("/api/v1/knowledge/cache", headers=admin_headers)
     assert r.status_code == 200
     assert r.json()["status"] == "ok"
-    assert client.get("/api/v1/knowledge/cache/stats").json()["total_entries"] == 0
+    stats = client.get("/api/v1/knowledge/cache/stats", headers=admin_headers).json()
+    assert stats["total_entries"] == 0
 
 
 def test_router_models(client):

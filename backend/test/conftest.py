@@ -139,6 +139,26 @@ def auth_headers(auth_token):
 
 
 @pytest.fixture()
+def admin_headers():
+    """管理员请求头。
+
+    注意 require_role 会**回查数据库**取权威角色（Token 里的 role 只是快照），
+    所以必须先把 users.role 改成 admin，光在 Token 里写 role 是不够的。
+    """
+    import uuid
+    from app.multitenant import register_user, _get_db
+    from app.middleware.auth import create_access_token
+    username = "pytest_admin_" + uuid.uuid4().hex[:8]
+    result = register_user(username, "pytest_pass_123")
+    conn = _get_db()
+    conn.execute("UPDATE users SET role='admin' WHERE id=?", (result["user_id"],))
+    conn.commit()
+    conn.close()
+    token = create_access_token(username, result["user_id"], role="admin")
+    return {"Authorization": "Bearer " + token}
+
+
+@pytest.fixture()
 def mock_llm(monkeypatch):
     """
     Mock urllib.request.urlopen，拦截所有 LLM HTTP 调用。

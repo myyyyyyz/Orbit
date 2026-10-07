@@ -1,9 +1,10 @@
 """RAG 策略路由: /api/knowledge/strategy"""
 import copy
 from datetime import datetime
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 
 from ..config import settings, RAGStrategy
+from ..middleware.auth import get_current_user, require_role
 from ..schemas.strategy import StrategyPatch, _apply_section, normalize_flat_patch
 
 router = APIRouter(prefix="/api/v1/knowledge", tags=["strategy"])
@@ -79,7 +80,13 @@ def _diff_strategy(before: dict, after: dict) -> list:
 
 
 @router.get("/strategy")
-def api_get_strategy():
+def api_get_strategy(current_user: dict = Depends(get_current_user)):
+    """读取全局 RAG 策略。
+
+    历史缺陷：本接口没有任何认证依赖，匿名请求即可探测检索/切分/存储的内部
+    参数（等于把 RAG 调优配置与版本号公之于众）。此处只要求登录；**修改**
+    策略仍是 admin 独占（见 api_patch_strategy）。
+    """
     s = _strategy_to_dict()
     s["_defaults_note"] = "所有字段均有默认值。PATCH 可部分更新。embed 段只读（单一实现）。"
     s["_readonly"] = ["version", "embed"]
@@ -93,7 +100,12 @@ def api_get_strategy():
 
 
 @router.patch("/strategy")
-def api_patch_strategy(patch: dict = Body(...)):
+def api_patch_strategy(patch: dict = Body(...), admin: dict = Depends(require_role("admin"))):
+    """修改全局 RAG 策略——立即影响**所有**用户的检索/切分行为，仅 admin 可调。
+
+    历史缺陷：本接口没有任何认证依赖（实测匿名 PATCH 返回 200），任何人都能
+    改线上 chunk / retrieval / storage 参数，等于对外开放了全局检索行为开关。
+    """
     before = copy.deepcopy(_strategy_to_dict())
     try:
         _apply_strategy_patch(settings.rag, patch)

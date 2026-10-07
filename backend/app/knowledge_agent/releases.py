@@ -29,11 +29,17 @@ class ActiveIndexVersion(BaseModel):
 
 
 def _tenant_key(user_id: Optional[int]) -> str:
-    return "global" if user_id is None else str(user_id)
+    # 匿名（user_id=None）使用独立键 "anon"，不再复用 "global"。
+    # 历史版本把所有未登录请求归到 "global"，等于让匿名访客共享同一份
+    # active index / release 记录；改用独立键后，匿名的读写只落在匿名空间，
+    # 与任何登录用户、以及历史遗留的 global 记录彻底隔离。
+    return "anon" if user_id is None else str(user_id)
 
 
 def _legacy_collection(user_id: Optional[int]) -> str:
-    return f"user_{user_id}" if user_id is not None else settings.CHROMA_COLLECTION
+    # 匿名用户回退到独立的匿名沙箱，而不是全局 `documents` 库——
+    # 否则未登录访客会读到（并可经由 upload/delete 改写）全局共享空间。
+    return f"user_{user_id}" if user_id is not None else settings.ANON_COLLECTION
 
 
 def _ensure_release_schema(connection) -> None:
