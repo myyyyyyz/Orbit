@@ -18,6 +18,7 @@ from .core import (
     _knowledge_database_path,
     resolve_active_collection,
     resolve_active_version,
+    resolve_scope,
     search,
 )
 from .format import search_formatted
@@ -34,6 +35,7 @@ __all__ = [
     "_knowledge_database_path",
     "resolve_active_collection",
     "resolve_active_version",
+    "resolve_scope",
     "search",
     "search_formatted",
 ]

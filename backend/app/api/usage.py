@@ -2,6 +2,14 @@
 
 返回当日 token 消耗、按模型拆分、成本估算。
 由前端仪表盘调用，与生成服务中的 token 记录联动。
+
+多租户口径（本轮改造后再收紧一层）
+----------------------------------
+每条记录都带 ``tenant_id`` + ``user_id`` 归属；读取时只汇总**当前请求方所属租户**
+的记录。历史实现只按 user_id 过滤且限额是全局的——同一个组织里 A 用完额度
+会拖住 B，而且组织管理员看不到本组织的汇总。
+
+匿名访客只看到匿名记录（``tenant_id`` 为 None），不会触达任何租户的消耗。
 """
 
 import json
@@ -9,10 +17,10 @@ import os
 import time
 from collections import defaultdict
 from datetime import datetime
+from typing import Optional
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from typing import Optional
 
 from ..config import DATA_DIR
 from ..middleware.auth import get_optional_user
@@ -39,6 +47,8 @@ class UsageResponse(BaseModel):
     by_model: list[ModelUsage]
     limit_warning: bool
     limit_percent: float
+    tenant_id: Optional[str] = None
+    scope: str = "tenant"
 
 
 def _get_today_iso() -> str:
@@ -46,8 +56,17 @@ def _get_today_iso() -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
 
-def _read_today_usage() -> list[dict]:
-    """读取当天用量记录。"""
+def _read_today_usage(
+    user_id: Optional[int] = None, tenant_id: Optional[str] = None
+) -> list[dict]:
+    """读取当天属于该租户（或该匿名请求方）的用量记录。
+
+    归属判定：
+    - 提供 ``tenant_id`` → 只取同租户记录（含该租户内所有成员，组织级汇总）
+    - 未提供（匿名）    → 只取 ``tenant_id`` 为空且 ``user_id`` 相等的记录。
+
+    历史上这里不带任何过滤，任何用户都能看到**全站**消耗与成本。
+    """
     today = _get_today_iso()
     records = []
     os.makedirs(os.path.dirname(USAGE_LOG_PATH), exist_ok=True)
@@ -59,10 +78,18 @@ def _read_today_usage() -> list[dict]:
                     continue
                 try:
                     rec = json.loads(line)
-                    if rec.get("date") == today:
-                        records.append(rec)
                 except json.JSONDecodeError:
                     continue
+                if rec.get("date") != today:
+                    continue
+                if tenant_id:
+                    if rec.get("tenant_id") != tenant_id:
+                        continue
+                else:
+                    # 匿名：既无租户归属，又要与自己那一条对齐
+                    if rec.get("tenant_id") or rec.get("user_id") != user_id:
+                        continue
+                records.append(rec)
     except FileNotFoundError:
         pass
     return records
@@ -88,22 +115,16 @@ def _estimate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> fl
 
 
 @router.get("/usage", response_model=UsageResponse)
-def get_usage(user_id: Optional[int] = Depends(get_optional_user)):
-    """获取当日 Token 用量汇总。
+def get_usage(current_user: Optional[dict] = Depends(get_optional_user)):
+    """获取当日 Token 用量汇总（**仅当前请求方所属租户**）。
 
-    返回格式：
-        {
-            "date": "2026-08-11",
-            "prompt_tokens": 15000,
-            "completion_tokens": 8000,
-            "total_tokens": 23000,
-            "estimated_cost_usd": 0.05,
-            "by_model": [...],
-            "limit_warning": false,
-            "limit_percent": 5.0
-        }
+    历史缺陷：入参名写成 `user_id: Optional[int] = Depends(get_optional_user)`，
+    实际注入的是整个 user dict；且 `_read_today_usage()` 不带过滤，返回**全站**
+    当日用量——任何用户都能看到别人的消耗与成本。
     """
-    records = _read_today_usage()
+    tenant_id = current_user.get("tenant_id") if current_user else None
+    user_id = current_user.get("user_id") if current_user else None
+    records = _read_today_usage(user_id=user_id, tenant_id=tenant_id)
 
     total_prompt = 0
     total_completion = 0
@@ -123,7 +144,8 @@ def get_usage(user_id: Optional[int] = Depends(get_optional_user)):
     total_tokens = total_prompt + total_completion
     total_cost = round(sum(m["cost"] for m in model_stats.values()), 6)
 
-    # 预算告警：每日默认上限 1M token
+    # 预算告警：**按租户**计的每日上限（历史上是按全站计的，一个组织跑满
+    # 会让所有组织一起收到告警）。
     daily_limit = int(os.getenv("LLM_DAILY_LIMIT_TOKENS", "1000000"))
     limit_percent = round((total_tokens / daily_limit) * 100, 1) if daily_limit else 0
     limit_warning = limit_percent >= 80
@@ -147,17 +169,24 @@ def get_usage(user_id: Optional[int] = Depends(get_optional_user)):
         by_model=by_model,
         limit_warning=limit_warning,
         limit_percent=limit_percent,
+        tenant_id=tenant_id,
+        scope="tenant" if tenant_id else "anonymous",
     )
 
 
-def log_token_usage(model: str, prompt_tokens: int, completion_tokens: int, status: str = "success") -> None:
+def log_token_usage(model: str, prompt_tokens: int, completion_tokens: int,
+                    status: str = "success", user_id: Optional[int] = None,
+                    tenant_id: Optional[str] = None) -> None:
     """记录一次 LLM 调用的 token 消耗到用量文件。
 
-    供 generate/service.py 和 stream/service.py 在 LLM 调用完成后调用。
+    供 generate/service.py 在 LLM 调用完成后调用。
+    ``tenant_id`` + ``user_id`` 决定这条记录归属谁；两者都缺省则记为匿名。
     """
     rec = {
         "date": _get_today_iso(),
         "timestamp": time.time(),
+        "tenant_id": tenant_id,
+        "user_id": user_id,
         "model": model,
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,

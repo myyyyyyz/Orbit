@@ -1,9 +1,13 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Upload, FileText, Search, Trash2, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
+import {
+  Upload, FileText, Search, Trash2, Loader2, CheckCircle2, AlertCircle,
+  Building2, Lock,
+} from "lucide-react";
 import { cn, formatSize } from "@/lib/utils";
-import { knowledge } from "@/lib/api";
+import { knowledge, type KnowledgeScope } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
 import { KnowledgeWorkbench } from "@/components/knowledge-workbench/knowledge-workbench";
 
 interface DocRecord {
@@ -41,6 +45,11 @@ export function KnowledgeBasePanel() {
 }
 
 function LegacyKnowledgeBasePanel() {
+  const { isAuthenticated } = useAuth();
+  // 空间选择：组织共享 / 仅我的。匿名会话没有个人空间，一律落匿名沙箱。
+  const [scopeChoice, setScopeChoice] = useState<KnowledgeScope>("shared");
+  const scope: KnowledgeScope = isAuthenticated ? scopeChoice : "shared";
+
   const [documents, setDocuments] = useState<DocRecord[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<"idle" | "success" | "error">("idle");
@@ -48,9 +57,11 @@ function LegacyKnowledgeBasePanel() {
   const [backendError, setBackendError] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Fetch existing documents on mount
+  // Fetch existing documents on mount / space switch
   useEffect(() => {
-    knowledge.search("", 50).then((data) => {
+    let cancelled = false;
+    knowledge.search("", 50, scope).then((data) => {
+      if (cancelled) return;
       if (data.results) {
         const seen = new Set<string>();
         const docs: DocRecord[] = [];
@@ -63,8 +74,9 @@ function LegacyKnowledgeBasePanel() {
         }
         setDocuments(docs);
       }
-    }).catch(() => setBackendError(true));
-  }, []);
+    }).catch(() => { if (!cancelled) setBackendError(true); });
+    return () => { cancelled = true; };
+  }, [scope]);
 
   const handleUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -74,7 +86,7 @@ function LegacyKnowledgeBasePanel() {
     setUploadStatus("idle");
 
     try {
-      const res = await knowledge.upload(file);
+      const res = await knowledge.upload(file, scope);
       setDocuments((prev) => [
         { filename: res.filename, status: res.status, size: file.size, uploadedAt: new Date().toLocaleString() },
         ...prev.filter((d) => d.filename !== res.filename),
@@ -86,15 +98,15 @@ function LegacyKnowledgeBasePanel() {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
-  }, []);
+  }, [scope]);
 
   const handleDelete = useCallback((filename: string) => {
     setDocuments((prev) => prev.filter((d) => d.filename !== filename));
-    // 后端按 source 元数据删除该文档的全部 chunk
-    knowledge.deleteSource(filename).catch(() => {
+    // 后端按 source 元数据删除该文档的全部 chunk（必须指定其所在空间）
+    knowledge.deleteSource(filename, scope).catch(() => {
       /* best-effort：失败不阻塞 UI，刷新后可见真实状态 */
     });
-  }, []);
+  }, [scope]);
 
   return (
     <div className="flex h-full flex-col">
@@ -108,6 +120,42 @@ function LegacyKnowledgeBasePanel() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
+        {/* 空间选择：组织共享 / 仅我的 */}
+        <div>
+          <div className="grid grid-cols-2 gap-1 rounded-lg border border-border bg-surface/40 p-1">
+            {([
+              { key: "shared" as const, label: "组织共享", icon: <Building2 className="h-3.5 w-3.5" /> },
+              { key: "personal" as const, label: "仅我的", icon: <Lock className="h-3.5 w-3.5" /> },
+            ]).map(({ key, label, icon }) => {
+              const active = scope === key;
+              const disabled = key === "personal" && !isAuthenticated;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => setScopeChoice(key)}
+                  className={cn(
+                    "flex items-center justify-center gap-1.5 rounded-md py-1.5 text-xs transition-colors",
+                    active ? "bg-primary text-white" : "text-muted hover:bg-surface",
+                    disabled && "cursor-not-allowed opacity-40 hover:bg-transparent"
+                  )}
+                >
+                  {icon}
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-1.5 text-[11px] text-muted/60">
+            {isAuthenticated
+              ? (scope === "shared"
+                  ? "上传与删除作用于「组织共享库」，同组织成员都可以检索到。"
+                  : "上传与删除只作用于「我的私有库」，仅你本人可检索。")
+              : "未登录：使用匿名空间。登录后可使用组织共享库与个人私有库。"}
+          </p>
+        </div>
+
         {/* Upload Area */}
         <div>
           <div

@@ -32,6 +32,7 @@ from ..knowledge_agent.releases import (
 from ..knowledge_agent.run_state import InvalidRunTransition
 from ..knowledge_agent.staging_store import StagingStore, StorageFailed
 from ..middleware.auth import get_current_user
+from ..multitenant import normalize_scope, scope_from_user
 
 
 router = APIRouter(prefix="/api/v1/knowledge", tags=["knowledge"])
@@ -256,14 +257,19 @@ def api_get_evaluation(
 @router.post("/runs/{run_id}/promote")
 def api_promote_run(
     run_id: str,
+    scope: Optional[str] = Query(None, description="shared=组织共享库（默认）| personal=我的私有库"),
     current_user: dict = Depends(get_current_user),
 ):
+    """把一次摄取 run 提升为该作用域的 active index。
+
+    作用域来自认证身份；``scope`` 只决定"提升到组织共享库还是本人的私有库"。
+    """
     store = StagingStore()
     try:
         return promote_run(
             run_id,
             database_path=_database_path(),
-            user_id=current_user["user_id"],
+            scope=scope_from_user(current_user, normalize_scope(scope)),
             collection_exists=lambda name: store.collection_exists(name),
         )
     except ReleaseConflict as exc:
@@ -275,16 +281,19 @@ def api_promote_run(
 
 @router.get("/active-version")
 def api_get_active_version(
+    scope: Optional[str] = Query(None, description="shared=组织共享库（默认）| personal=我的私有库"),
     current_user: dict = Depends(get_current_user),
 ):
     return get_active_index(
-        user_id=current_user["user_id"], database_path=_database_path()
+        scope=scope_from_user(current_user, normalize_scope(scope)),
+        database_path=_database_path(),
     )
 
 
 @router.post("/runs/{run_id}/rollback")
 def api_rollback_run(
     run_id: str,
+    scope: Optional[str] = Query(None, description="shared=组织共享库（默认）| personal=我的私有库"),
     current_user: dict = Depends(get_current_user),
 ):
     store = StagingStore()
@@ -292,7 +301,7 @@ def api_rollback_run(
         return rollback_run(
             run_id,
             database_path=_database_path(),
-            user_id=current_user["user_id"],
+            scope=scope_from_user(current_user, normalize_scope(scope)),
             collection_exists=lambda name: store.collection_exists(name),
         )
     except ReleaseConflict as exc:

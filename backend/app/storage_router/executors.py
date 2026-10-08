@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 
 
-def execute_strategy(route_result: dict, filepath: str, text: str = "") -> dict:
+def execute_strategy(route_result: dict, filepath: str, text: str = "", scope=None) -> dict:
     """
     根据路由结果执行实际操作。
 
@@ -12,6 +12,7 @@ def execute_strategy(route_result: dict, filepath: str, text: str = "") -> dict:
         route_result: route_storage() 的返回值
         filepath: 已保存的临时文件路径
         text: 已提取的文本内容（可选）
+        scope: TenantScope；决定向量化结果落哪个知识库（不传取请求级上下文）
 
     Returns:
         {"status": "ok", "details": {...}} 或 {"status": "error", "message": ...}
@@ -23,7 +24,7 @@ def execute_strategy(route_result: dict, filepath: str, text: str = "") -> dict:
     try:
         if strategy == "original":
             # 原样保存 + 全文索引
-            results.update(_execute_original(filepath, filename))
+            results.update(_execute_original(filepath, filename, scope))
             results["actions_performed"].append("fulltext_index")
 
         elif strategy == "structured":
@@ -34,19 +35,19 @@ def execute_strategy(route_result: dict, filepath: str, text: str = "") -> dict:
         elif strategy == "rag":
             # 向量化入库（已有文本时直接入库）
             if text:
-                results.update(_execute_rag(filepath, filename, text))
+                results.update(_execute_rag(filepath, filename, text, scope))
             else:
                 results.update({"status": "skipped", "message": "无文本内容，跳过 RAG 索引"})
             results["actions_performed"].append("rag_index")
 
         elif strategy == "multimodal":
             # OCR + RAG
-            results.update(_execute_multimodal(filepath, filename, text))
+            results.update(_execute_multimodal(filepath, filename, text, scope))
             results["actions_performed"].append("ocr_extraction")
 
         elif strategy == "graph":
             # 知识图谱
-            results.update(_execute_graph(filepath, filename, text))
+            results.update(_execute_graph(filepath, filename, text, scope))
             results["actions_performed"].append("graph_build")
 
         else:
@@ -59,7 +60,7 @@ def execute_strategy(route_result: dict, filepath: str, text: str = "") -> dict:
     return results
 
 
-def _execute_original(filepath: str, filename: str) -> dict:
+def _execute_original(filepath: str, filename: str, scope=None) -> dict:
     """原样保存 + 全文索引（简单版：写入 ChromaDB 整篇不切割）"""
     from ..store import add_documents
 
@@ -72,7 +73,7 @@ def _execute_original(filepath: str, filename: str) -> dict:
         "source": filename,
         "storage": "original",
         "filepath": filepath,
-    }}])
+    }}], scope)
 
     return {
         "status": "ok",
@@ -142,7 +143,7 @@ def _execute_structured(filepath: str, filename: str) -> dict:
         return {"status": "error", "message": f"不支持的结构化文件类型: {ext}"}
 
 
-def _execute_rag(filepath: str, filename: str, text: str) -> dict:
+def _execute_rag(filepath: str, filename: str, text: str, scope=None) -> dict:
     """文本走 RAG 向量化"""
     from ..chunk import chunk_text
     from ..store import add_documents
@@ -153,12 +154,12 @@ def _execute_rag(filepath: str, filename: str, text: str) -> dict:
         "filepath": filepath,
     })
     if chunks:
-        count = add_documents(chunks)
+        count = add_documents(chunks, scope)
         return {"status": "ok", "message": f"RAG 索引完成", "chunks": count}
     return {"status": "error", "message": "文本切割失败"}
 
 
-def _execute_multimodal(filepath: str, filename: str, text: str = "") -> dict:
+def _execute_multimodal(filepath: str, filename: str, text: str = "", scope=None) -> dict:
     """多模态：OCR 提取文字 + RAG"""
     ocr_text = ""
 
@@ -181,10 +182,10 @@ def _execute_multimodal(filepath: str, filename: str, text: str = "") -> dict:
     if not ocr_text.strip():
         ocr_text = text or f"[图片文件: {filename}]"
 
-    return _execute_rag(filepath, filename, ocr_text)
+    return _execute_rag(filepath, filename, ocr_text, scope)
 
 
-def _execute_graph(filepath: str, filename: str, text: str = "") -> dict:
+def _execute_graph(filepath: str, filename: str, text: str = "", scope=None) -> dict:
     """知识图谱：简单版 JSON 保存"""
     import json as json_module
     graph_dir = os.path.join(os.path.dirname(filepath), "..", "graph_data")
@@ -202,7 +203,7 @@ def _execute_graph(filepath: str, filename: str, text: str = "") -> dict:
         json_module.dump(data, f, ensure_ascii=False, indent=2)
 
     # 同时做 RAG 方便搜索
-    return _execute_rag(filepath, filename, text)
+    return _execute_rag(filepath, filename, text, scope)
 
 
 def _safe_table_name(filename: str) -> str:

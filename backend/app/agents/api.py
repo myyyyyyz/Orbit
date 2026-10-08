@@ -383,26 +383,54 @@ async def api_delete_schedule(
 # "pause-all" 当作 loop_id 解析成 int 并返回 422。
 
 
+def _memory_scope_dir(user_id: Optional[int]) -> str:
+    """当前请求方的记忆目录（与 api/logos.py 的写入位置保持一致）。"""
+    scope = f"user_{user_id}" if user_id else "anon"
+    return os.path.realpath(os.path.join(DATA_DIR, "memory", "users", scope))
+
+
+def _allowed_memory_roots(user_id: Optional[int]) -> list[str]:
+    """允许被扫描的根目录白名单。
+
+    只放行「当前请求方自己的记忆目录」与显式配置的 FILE_MEMORY_ROOT。
+    否则 root 参数本身就是一个任意路径读取原语。
+    """
+    roots = [_memory_scope_dir(user_id)]
+    extra = (os.getenv("FILE_MEMORY_ROOT") or "").strip()
+    if extra:
+        roots.append(os.path.realpath(extra))
+    return roots
+
+
 @router.get("/memory/scan")
 def api_memory_scan(
     request: Request = None,
-    current_user: Optional[dict] = Depends(get_optional_user),
+    current_user: dict = Depends(get_current_user),
 ):
     """P6：扫描记忆目录（只读前 30 行/文件，不调用 LLM），返回元数据清单。
 
-    query: root=记忆目录绝对路径；缺省回退 FILE_MEMORY_ROOT / data/memory。
+    query: root=记忆目录绝对路径；缺省为**当前用户**自己的记忆目录。
+
+    历史缺陷：本接口既无认证依赖，又把 query 里的 root 直接当路径扫描，
+    等于对外开放了一个"任意目录内容探测"端点（可枚举文件、读取前 30 行）。
     """
     from ..memory.file_memory import scan_memory_files, build_listing
-    from ..llm.client import get_llm_config
+
+    user_id = current_user.get("user_id")
+    allowed = _allowed_memory_roots(user_id)
+    default_root = _memory_scope_dir(user_id)
 
     root = (request.query_params.get("root") or "").strip()
-    if not root:
-        root = os.getenv("FILE_MEMORY_ROOT", "") or os.path.join(
-            DATA_DIR, "memory"
-        )
+    if root:
+        root = os.path.realpath(root)
+        if not any(root == a or root.startswith(a + os.sep) for a in allowed):
+            raise HTTPException(403, "root 不在允许的记忆目录范围内")
+    else:
+        root = default_root
+
     files = scan_memory_files(root)
     return {
-        "root": os.path.realpath(root) if root else "",
+        "root": root,
         "scanned": len(files),
         "listing": build_listing(files),
         "files": [{
@@ -417,23 +445,30 @@ def api_memory_scan(
 async def api_memory_select(
     body: dict = Body(...),
     request: Request = None,
-    current_user: Optional[dict] = Depends(get_optional_user),
+    current_user: dict = Depends(get_current_user),
 ):
     """P6：query + 记忆清单 → 小模型选择最相关记忆（宁缺毋滥 + 后校验 + 预算注入预览）。
 
     body: {query, root?, model?}；header X-API-Key 传 key。
+    root 与 /memory/scan 同口径：必须落在允许的根目录之内。
     """
     from ..memory.file_memory import scan_memory_files, select_relevant, build_file_memory_context
-    from ..llm.client import get_llm_config
 
     query = (body.get("query") or "").strip()
     if not query:
         raise HTTPException(400, "query 不能为空")
+
+    user_id = current_user.get("user_id")
+    allowed = _allowed_memory_roots(user_id)
+    default_root = _memory_scope_dir(user_id)
+
     root = (body.get("root") or "").strip()
-    if not root:
-        root = os.getenv("FILE_MEMORY_ROOT", "") or os.path.join(
-            DATA_DIR, "memory"
-        )
+    if root:
+        root = os.path.realpath(root)
+        if not any(root == a or root.startswith(a + os.sep) for a in allowed):
+            raise HTTPException(403, "root 不在允许的记忆目录范围内")
+    else:
+        root = default_root
     api_key = request.headers.get("X-API-Key") or None
     model = (body.get("model") or "").strip() or request.headers.get("X-LLM-Model") or None
     session_id = (body.get("session_id") or "").strip()

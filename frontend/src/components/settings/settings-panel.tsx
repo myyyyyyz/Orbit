@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ToolPolicyPanel } from "./tool-policy-panel";
+import { TenantPanel } from "./tenant-panel";
 
 // C4: 缓存命中率面板数据结构
 interface CacheStats {
@@ -270,6 +271,9 @@ export function SettingsPanel() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
+        {/* 组织与成员（多租户）：组织名 / 邀请码 / 成员角色 / 加入组织 */}
+        <TenantPanel />
+
         {/* System Health */}
         <section>
           <h3 className="flex items-center gap-2 text-sm font-medium mb-3">

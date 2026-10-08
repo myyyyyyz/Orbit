@@ -220,6 +220,13 @@ async function request<T>(
 }
 
 // Auth
+/** 可见的知识库命名空间。shared=组织共享，personal=我的私有，anonymous=匿名沙箱。 */
+export interface Collections {
+  shared: string | null;
+  personal: string | null;
+  anonymous?: string | null;
+}
+
 export interface TokenResponse {
   access_token: string;
   refresh_token?: string;
@@ -229,14 +236,28 @@ export interface TokenResponse {
   username?: string;
   role?: string;
   tenant_id?: string;
-  collection_name?: string;
+  /** 组织内角色：owner / admin / member */
+  tenant_role?: string;
+  tenant_name?: string | null;
+  invite_code?: string | null;
+  collections?: Collections;
 }
 
 export const auth = {
-  register: (username: string, password: string) =>
+  /**
+   * 注册并落地到组织。
+   * - 不传 inviteCode → 新建组织（orgName 为组织名，缺省用用户名），成为 owner
+   * - 传 inviteCode → 加入该组织，成为 member（orgName 被忽略）
+   */
+  register: (username: string, password: string, opts?: { orgName?: string; inviteCode?: string }) =>
     request<TokenResponse>(`${V1}/auth/register`, {
       method: "POST",
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({
+        username,
+        password,
+        ...(opts?.orgName ? { org_name: opts.orgName } : {}),
+        ...(opts?.inviteCode ? { invite_code: opts.inviteCode } : {}),
+      }),
     }),
   login: (username: string, password: string) =>
     request<TokenResponse>(`${V1}/auth/login`, {
@@ -255,39 +276,118 @@ export const auth = {
     } catch { /* 令牌可能已过期，本地清理即可 */ }
     clearTokens();
   },
+  /**
+   * 用邀请码加入（或切换到）目标组织。
+   * 返回体里带**新签发的令牌**——旧 Token 的 tenant_id 是加入前组织的快照，
+   * 不替换会让后续请求继续以旧组织身份执行。
+   */
+  join: (inviteCode: string) =>
+    request<TokenResponse & { status: string; message: string }>(`${V1}/auth/join`, {
+      method: "POST",
+      body: JSON.stringify({ invite_code: inviteCode }),
+    }),
   me: () =>
-    request<{ user_id: number; username: string; role: string; tenant_id?: string }>(
-      `${V1}/auth/me`
+    request<{
+      user_id: number;
+      username: string;
+      role: string;
+      tenant_id?: string;
+      tenant_role?: string;
+      tenant_name?: string | null;
+      invite_code?: string | null;
+      collections?: Collections;
+    }>(`${V1}/auth/me`),
+};
+
+// Tenants（组织管理）
+export interface TenantMember {
+  id: number;
+  username: string;
+  role: string;
+  tenant_role: string;
+  created_at?: string;
+}
+
+export interface TenantSummary {
+  id: string;
+  name: string;
+  plan?: string;
+  max_collections?: number;
+  max_storage_mb?: number;
+  invite_code?: string | null;
+  owner_user_id?: number | null;
+  created_at?: string;
+  member_count: number;
+  my_role?: string;
+  my_user_id?: number;
+  collections?: Collections;
+}
+
+export const tenants = {
+  me: () => request<TenantSummary>(`${V1}/tenants/me`),
+  members: () =>
+    request<{ tenant_id: string; count: number; members: TenantMember[]; roles: string[] }>(
+      `${V1}/tenants/me/members`
+    ),
+  /** 修改组织名称（owner / admin） */
+  rename: (name: string) =>
+    request<{ status: string; id: string; name: string }>(`${V1}/tenants/me`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    }),
+  /** 轮换邀请码（owner / admin）；旧码立即失效 */
+  rotateInviteCode: () =>
+    request<{ status: string; invite_code: string }>(`${V1}/tenants/me/invite-code`, {
+      method: "POST",
+    }),
+  /** 调整成员在组织内的角色（仅 owner） */
+  updateMemberRole: (userId: number, tenantRole: string) =>
+    request<{ status: string; member: TenantMember }>(
+      `${V1}/tenants/me/members/${userId}`,
+      { method: "PATCH", body: JSON.stringify({ tenant_role: tenantRole }) }
     ),
 };
 
 // Knowledge Base
+/**
+ * 写入空间选择器：shared=组织共享（默认），personal=我的私有。
+ * 读取（search / ask / streamAsk）传 scope 不改变可见范围——服务端一律是
+ * 「组织共享 ∪ 本人私有」，scope 只影响返回明细的口径；匿名用户无论传什么都落匿名沙箱。
+ */
+export type KnowledgeScope = "shared" | "personal";
+
+export interface KnowledgeSearchResult {
+  text: string;
+  metadata: Record<string, string>;
+  score: number;
+}
+
 export const knowledge = {
-  upload: (file: File) => {
+  upload: (file: File, scope: KnowledgeScope = "shared") => {
     const formData = new FormData();
     formData.append("file", file);
-    return request<{ filename: string; status: string }>(
-      `${V1}/knowledge/upload`,
+    return request<{ filename: string; status: string; scope?: string; collection?: string }>(
+      `${V1}/knowledge/upload?scope=${scope}`,
       { method: "POST", body: formData }
     );
   },
 
-  search: (q: string, topK = 5) =>
-    request<{ results: { text: string; metadata: Record<string, string>; score: number }[] }>(
-      `${V1}/knowledge/search?q=${encodeURIComponent(q)}&top_k=${topK}`
+  search: (q: string, topK = 5, scope?: KnowledgeScope) =>
+    request<{ results: KnowledgeSearchResult[] }>(
+      `${V1}/knowledge/search?q=${encodeURIComponent(q)}&top_k=${topK}${scope ? `&scope=${scope}` : ""}`
     ),
 
-  /** 按 source 元数据删除该文档的全部 chunk */
-  deleteSource: (source: string) =>
-    request<{ status: string; source: string; message: string }>(
-      `${V1}/knowledge/source?source=${encodeURIComponent(source)}`,
+  /** 按 source 元数据删除该文档的全部 chunk（需指定其所在空间） */
+  deleteSource: (source: string, scope: KnowledgeScope = "shared") =>
+    request<{ status: string; source: string; message: string; scope?: string }>(
+      `${V1}/knowledge/source?source=${encodeURIComponent(source)}&scope=${scope}`,
       { method: "DELETE" }
     ),
 
-  ask: (question: string, topK = 5) =>
+  ask: (question: string, topK = 5, scope?: KnowledgeScope) =>
     request<{ answer: string; sources: { filename: string; chunk: string }[] }>(
       `${V1}/knowledge/ask`,
-      { method: "POST", body: JSON.stringify({ question, top_k: topK }) }
+      { method: "POST", body: JSON.stringify({ question, top_k: topK, ...(scope ? { scope } : {}) }) }
     ),
 
   streamAsk: (
@@ -296,12 +396,14 @@ export const knowledge = {
     onToken?: (token: string) => void,
     onDone?: (model: string) => void,
     onError?: (error: string) => void,
-    abortSignal?: AbortSignal
+    abortSignal?: AbortSignal,
+    scope?: KnowledgeScope
   ): Promise<void> => {
     const params = new URLSearchParams({
       q: question,
       top_k: String(topK),
     });
+    if (scope) params.set("scope", scope);
     const url = `${API_BASE}${V1}/knowledge/ask/stream?${params}`;
 
     let doneCalled = false;

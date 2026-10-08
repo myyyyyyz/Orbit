@@ -55,9 +55,18 @@ def build_sources(chunks: list[dict], default_source: str = "未知") -> list[di
     ]
 
 
-def build_rag_user_message(question: str, context_text: str) -> str:
-    """宽松版 RAG 用户消息（stream_ask 使用）。"""
-    return f"## 检索结果\n\n{context_text}\n\n---\n\n## 问题\n\n{question}"
+def build_rag_user_message(question: str, context_text: str, slots: dict = None) -> str:
+    """宽松版 RAG 用户消息（stream_ask 使用）。
+
+    slots 非空时附带「已识别到的关键信息」，把槽位填充结果显式告诉生成模型，
+    用于消解指代/时间歧义（如把「上周的部署文档」锚定为 time=上周、doc_type=部署文档）。
+    slots 为空时输出与历史版本完全一致，保持向后兼容。
+    """
+    base = f"## 检索结果\n\n{context_text}\n\n---\n\n## 问题\n\n{question}"
+    if not slots:
+        return base
+    slot_lines = "\n".join(f"- {k}: {v}" for k, v in slots.items())
+    return f"{base}\n\n---\n\n## 已识别到的关键信息\n\n{slot_lines}"
 
 
 def build_strict_rag_user_message(question: str, context_text: str) -> str:
