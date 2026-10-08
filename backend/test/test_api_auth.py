@@ -15,15 +15,17 @@ def _register(client, username, password=PASSWORD, **extra):
 
 def test_register_success(client):
     username = _username()
-    r = _register(client, username, tenant_id="org_t")
+    r = _register(client, username, org_name="org_t")
     assert r.status_code == 200
     data = r.json()
     assert data["access_token"]
     assert data["refresh_token"]
     assert data["token_type"] == "bearer"
     assert data["username"] == username
-    assert data["tenant_id"] == "org_t"
-    assert data["collection_name"] == f"user_{data['user_id']}"
+    assert data["tenant_id"].startswith("org_")   # 租户 id 由服务端生成
+    assert data["tenant_name"] == "org_t"         # 组织名取自注册入参
+    assert data["collections"]["shared"]          # 组织共享库
+    assert data["collections"]["personal"]        # 本人私有库
 
 
 def test_register_rejects_short_password(client):
@@ -124,7 +126,8 @@ def test_me_with_valid_token(client, auth_headers):
     assert r.status_code == 200
     data = r.json()
     assert data["username"].startswith("pytest_")
-    assert data["collection_name"] == f"user_{data['user_id']}"
+    assert data["collections"]["shared"]
+    assert data["collections"]["personal"]
 
 
 def test_me_without_token(client):

@@ -2,7 +2,6 @@
 
 import json
 import time
-from typing import Optional
 
 from ..logging_config import get_logger
 from ..llm import (
@@ -21,14 +20,15 @@ logger = get_logger(__name__)
 
 
 def generate_answer(question: str, context_chunks: list[dict], history: list[dict] = None,
-                    model: str = None, api_key: str = None, user_id: Optional[int] = None) -> dict:
+                    model: str = None, api_key: str = None, scope=None) -> dict:
     """
     RAG 生成：检索结果 + 用户问题 → LLM → 带引用的答案
 
     参数:
         model: 指定 LLM 模型名。不传时使用 LLM_MODEL 环境变量默认值。
         api_key: API Key。优先使用此参数，不传（None）时回退到环境变量 LLM_API_KEY。
-        user_id: 调用方用户 ID，仅用于把 token 用量记到正确的归属下（可匿名）。
+        scope: TenantScope，用于把 token 用量记到正确的租户/用户归属下
+               （不传时取请求级上下文，匿名则记为匿名）。
 
     返回: { "answer", "sources", "model", "context_count" }
     """
@@ -99,15 +99,19 @@ def generate_answer(question: str, context_chunks: list[dict], history: list[dic
             context_count=len(context_chunks),
         )
 
-        # 记录 token 用量（带归属）。延迟导入避免 api 包与 generate 的循环依赖；
+        # 记录 token 用量（带租户/用户归属）。延迟导入避免 api 包与 generate 的循环依赖；
         # 用量写入失败绝不影响主流程。
         try:
             from ..api.usage import log_token_usage
+            from ..multitenant.context import get_current_scope
+
+            resolved = scope or get_current_scope()
             log_token_usage(
                 result["model_used"],
                 usage.get("prompt_tokens", 0),
                 usage.get("completion_tokens", 0),
-                user_id=user_id,
+                user_id=resolved.user_id,
+                tenant_id=resolved.tenant_id,
             )
         except Exception:
             logger.warning("token_usage_log_failed", model=result["model_used"], exc_info=True)

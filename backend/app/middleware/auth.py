@@ -33,6 +33,12 @@ from fastapi.security import OAuth2PasswordBearer
 
 from ..config import is_production
 from ..logging_config import get_logger
+from ..multitenant.context import (
+    SHARED,
+    TenantScope,
+    scope_from_user,
+    set_current_scope,
+)
 
 logger = get_logger(__name__)
 
@@ -46,6 +52,7 @@ TOKEN_TYPE_ACCESS = "access"
 TOKEN_TYPE_REFRESH = "refresh"
 
 _VALID_ROLES = ("user", "admin")
+_VALID_TENANT_ROLES = ("owner", "admin", "member")
 
 
 def get_secret_key() -> str:
@@ -138,6 +145,7 @@ def _create_token(
     expires_delta: timedelta,
     tenant_id: Optional[str] = None,
     role: Optional[str] = None,
+    tenant_role: Optional[str] = None,
 ) -> str:
     now = datetime.now(timezone.utc)
     payload = {
@@ -145,6 +153,9 @@ def _create_token(
         "user_id": user_id,
         "tenant_id": tenant_id,
         "role": role,
+        # 租户内角色（owner/admin/member）：与平台级 role 分开。
+        # Token 里只是签发快照，授权判定一律回查数据库（见 _load_tenant_role）。
+        "tenant_role": tenant_role,
         "type": token_type,
         "jti": uuid.uuid4().hex,
         "iat": now,
@@ -154,29 +165,29 @@ def _create_token(
 
 
 def create_access_token(username: str, user_id: int, tenant_id: Optional[str] = None,
-                        role: Optional[str] = None) -> str:
+                        role: Optional[str] = None, tenant_role: Optional[str] = None) -> str:
     """签发短时效 Access Token。"""
     return _create_token(
         username, user_id, TOKEN_TYPE_ACCESS,
-        timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES), tenant_id, role,
+        timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES), tenant_id, role, tenant_role,
     )
 
 
 def create_refresh_token(username: str, user_id: int, tenant_id: Optional[str] = None,
-                         role: Optional[str] = None) -> str:
+                         role: Optional[str] = None, tenant_role: Optional[str] = None) -> str:
     """签发 Refresh Token（长时效，仅用于换发 Access Token）。"""
     return _create_token(
         username, user_id, TOKEN_TYPE_REFRESH,
-        timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS), tenant_id, role,
+        timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS), tenant_id, role, tenant_role,
     )
 
 
 def create_token_pair(username: str, user_id: int, tenant_id: Optional[str] = None,
-                      role: Optional[str] = None) -> dict:
+                      role: Optional[str] = None, tenant_role: Optional[str] = None) -> dict:
     """一次签发 access + refresh，供登录/注册接口返回。"""
     return {
-        "access_token": create_access_token(username, user_id, tenant_id, role),
-        "refresh_token": create_refresh_token(username, user_id, tenant_id, role),
+        "access_token": create_access_token(username, user_id, tenant_id, role, tenant_role),
+        "refresh_token": create_refresh_token(username, user_id, tenant_id, role, tenant_role),
         "token_type": "bearer",
         "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     }
@@ -231,10 +242,26 @@ def _user_from_payload(payload: dict) -> dict:
         "username": payload.get("sub"),
         "tenant_id": payload.get("tenant_id"),
         "role": payload.get("role"),
+        "tenant_role": payload.get("tenant_role"),
         "jti": payload.get("jti"),
         # 带上 exp，登出时撤销表可以按真实过期时间清理，而不是一律按 Refresh 时长兜底
         "exp": payload.get("exp"),
     }
+
+
+def bind_scope(user: Optional[dict], scope: str = SHARED) -> TenantScope:
+    """把租户身份写入请求级上下文，返回解析后的作用域。
+
+    这是"身份只在认证层确定一次"的落点：认证依赖调用它之后，
+    下游的检索 / 入库 / 文件 / 缓存 / 用量都从这里读取身份，
+    无需层层透传参数，也不会因为某个调用点忘了传就落到全局库。
+
+    端点若需要个人私有空间，用 ``bind_scope(user, scope="personal")``
+    覆盖（此时 user 必须已登录，否则自动降级为组织共享 / 匿名沙箱）。
+    """
+    resolved = scope_from_user(user, scope)
+    set_current_scope(resolved)
+    return resolved
 
 
 def _unauthorized(detail: str) -> HTTPException:
@@ -250,27 +277,38 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
     FastAPI 依赖注入：从 Authorization: Bearer <token> 中提取当前用户。
 
     Raises HTTPException(401) 当 Token 缺失、无效、过期或已撤销时。
-    返回: {"user_id": 1, "username": "lover_a", "tenant_id": "org_123", "role": "user"}
+    返回: {"user_id": 1, "username": "lover_a", "tenant_id": "org_123",
+          "role": "user", "tenant_role": "member"}
+
+    副作用：把该请求的租户作用域写入 ContextVar（默认组织共享）。
     """
     if not token:
         raise _unauthorized("未提供认证 Token（Authorization: Bearer <token>）")
     payload = verify_access_token(token)
     if not payload:
         raise _unauthorized("Token 无效、已过期或已登出")
-    return _user_from_payload(payload)
+    user = _user_from_payload(payload)
+    bind_scope(user)
+    return user
 
 
 async def get_optional_user(token: str = Depends(oauth2_scheme)) -> Optional[dict]:
     """
     可选认证：有 Token 时返回用户信息，无 Token 时返回 None（不报错）。
     用于需要兼容匿名 + 已登录的场景。
+
+    副作用：写入请求级租户作用域；匿名时即匿名沙箱（不是全局库）。
     """
     if not token:
+        bind_scope(None)
         return None
     payload = verify_access_token(token)
     if not payload:
+        bind_scope(None)
         return None
-    return _user_from_payload(payload)
+    user = _user_from_payload(payload)
+    bind_scope(user)
+    return user
 
 
 # ── 授权（RBAC）────────────────────────────────────
@@ -294,7 +332,7 @@ def _load_role(user_id: Optional[int]) -> Optional[str]:
 
 
 def require_role(*allowed_roles: str):
-    """生成一个校验角色的依赖：`Depends(require_role("admin"))`。
+    """生成一个校验**平台级**角色的依赖：`Depends(require_role("admin"))`。
 
     历史缺陷：全仓有认证没有授权，`users.role` 字段形同虚设——
     全局 kill switch（pause-all）、工具策略等管理接口任何注册用户都能调用。
@@ -316,6 +354,59 @@ def require_role(*allowed_roles: str):
                 detail=f"权限不足，需要角色: {', '.join(allowed_roles)}",
             )
         current_user["role"] = role
+        return current_user
+
+    return _dependency
+
+
+def _load_tenant_role(user_id: Optional[int]) -> Optional[str]:
+    """从数据库读取用户在**本租户内**的权威角色（owner/admin/member）。
+
+    与平台级 `role` 同理：Token 里只是快照，降权必须立即生效 →
+    每请求回查一次；查询失败一律 fail-closed。
+    """
+    if not user_id:
+        return None
+    try:
+        from ..multitenant import get_user_by_id
+
+        user = get_user_by_id(user_id)
+        return (user or {}).get("tenant_role")
+    except Exception:
+        logger.warning("tenant_role_lookup_failed", user_id=user_id, exc_info=True)
+        return None
+
+
+def require_tenant_role(*allowed_roles: str):
+    """校验**租户内**角色的依赖：`Depends(require_tenant_role("owner", "admin"))`。
+
+    与 `require_role` 的区别：那个管全站（平台管理员），这个管本组织
+    （改组织名、轮换邀请码、管理成员）。混用会导致"某组织 owner
+    顺手拿到平台管理权"这类越权。
+    """
+    if not allowed_roles:
+        raise ValueError("require_tenant_role 至少需要一个角色")
+
+    async def _dependency(current_user: dict = Depends(get_current_user)) -> dict:
+        if not current_user.get("tenant_id"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="当前账号未归属任何组织",
+            )
+        tenant_role = _load_tenant_role(current_user.get("user_id"))
+        if tenant_role not in allowed_roles:
+            logger.warning(
+                "tenant_rbac_denied",
+                user_id=current_user.get("user_id"),
+                tenant_id=current_user.get("tenant_id"),
+                tenant_role=tenant_role,
+                required=list(allowed_roles),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"权限不足，需要组织内角色: {', '.join(allowed_roles)}",
+            )
+        current_user["tenant_role"] = tenant_role
         return current_user
 
     return _dependency

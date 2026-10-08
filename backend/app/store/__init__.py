@@ -9,6 +9,7 @@ from .client import (
     get_client,
     get_collection,
     get_collection_by_name,
+    resolve_scope,
 )
 from .documents import add_documents, delete_by_source, get_stats
 
@@ -19,6 +20,7 @@ __all__ = [
     "get_client",
     "get_collection",
     "get_collection_by_name",
+    "resolve_scope",
     "add_documents",
     "delete_by_source",
     "get_stats",

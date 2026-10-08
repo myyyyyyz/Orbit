@@ -5,8 +5,11 @@ import pytest
 
 import app.stream.service as stream_mod  # patch 目标：stream_ask 定义所在模块
 from app.stream import stream_ask, _sse, MIN_RELEVANCE_SCORE  # 验证 __init__ 再导出兼容
+from app.multitenant import TenantScope
 from app.retrieval import RetrievalPlan
 from app.router import RouteDecision
+
+STREAM_SCOPE = TenantScope("org_stream", 42, "shared")
 
 
 @pytest.fixture(autouse=True)
@@ -14,7 +17,7 @@ def _stable_cache_namespace(monkeypatch):
     """缓存命名空间依赖活跃索引版本；测试里固定住，避免触库/触向量库。"""
     class _V:
         collection_name = "test_collection"
-    monkeypatch.setattr(stream_mod, "resolve_active_version", lambda uid: _V())
+    monkeypatch.setattr(stream_mod, "resolve_active_version", lambda scope=None: _V())
 
 
 def _parse_sse(raw_events):
@@ -42,11 +45,14 @@ def _mock_pipeline(monkeypatch, chunks, retrieve=True):
     monkeypatch.setattr(stream_mod, "cache_put", lambda *a, **k: None)
     monkeypatch.setattr(
         stream_mod, "plan_retrieval",
-        lambda q, user_id=None, api_key=None: RetrievalPlan(
+        lambda q, api_key=None: RetrievalPlan(
             retrieve=retrieve, strategy="vector", top_k=5, threshold=MIN_RELEVANCE_SCORE,
         ),
     )
-    monkeypatch.setattr(stream_mod, "execute_retrieval_plan", lambda q, user_id=None, plan=None, api_key=None: chunks)
+    monkeypatch.setattr(
+        stream_mod, "execute_retrieval_plan",
+        lambda q, plan=None, api_key=None, scope=None: chunks,
+    )
     monkeypatch.setattr(stream_mod, "route_model", lambda q, s: _fake_route())
 
 
@@ -85,7 +91,7 @@ def test_cache_hit_short_circuits(monkeypatch):
 
 
 def test_cache_lookup_uses_tenant_namespace(monkeypatch, mock_llm):
-    """P0 回归：缓存读写必须带租户命名空间，否则跨用户串味。"""
+    """P0 回归：缓存读写必须带"身份"命名空间，否则跨用户串味。"""
     seen = {}
 
     def fake_get(q, **kw):
@@ -99,12 +105,14 @@ def test_cache_lookup_uses_tenant_namespace(monkeypatch, mock_llm):
     monkeypatch.setattr(stream_mod, "cache_put", fake_put)
     monkeypatch.setattr(
         stream_mod, "plan_retrieval",
-        lambda q, user_id=None, api_key=None: RetrievalPlan(retrieve=False),
+        lambda q, api_key=None: RetrievalPlan(retrieve=False),
     )
     monkeypatch.setattr(stream_mod, "route_model", lambda q, s: _fake_route())
 
-    list(stream_ask("问题", user_id=42, api_key="k"))
-    assert seen["get_ns"] is not None and seen["get_ns"].startswith("42:")
+    list(stream_ask("问题", scope=STREAM_SCOPE, api_key="k"))
+    assert seen["get_ns"] is not None
+    # 命名空间必须同时含租户与用户（读取会合并组织共享 + 本人私有文档）
+    assert seen["get_ns"].startswith("t:org_stream:u:42")
     assert seen["put_ns"] == seen["get_ns"]
 
 

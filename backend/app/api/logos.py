@@ -1,7 +1,8 @@
 """Logos 对话总结路由: /api/knowledge/logos
 
 职责:
-1. 对话结束后触发 LLM 压缩总结，写入 data/memory/YYYY-MM-DD.md（人机双读）
+1. 对话结束后触发 LLM 压缩总结，写入
+   `DATA_DIR/tenants/{tenant}/users/{user}/memory/YYYY-MM-DD.md`（人机双读）
 2. 同时产出结构化 key_points，落库 conversation_summary（供上下文恢复注入 LLM）
 """
 import os
@@ -10,12 +11,11 @@ import re
 import urllib.request
 import logging
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, Body, Depends, HTTPException
 
-from ..config import settings
 from ..middleware.auth import get_optional_user
+from ..multitenant import scope_from_user, user_memory_dir
 from ..memory import save_conversation_summary
 
 logger = logging.getLogger(__name__)
@@ -96,13 +96,11 @@ def api_logos_summarize(body: dict = Body(...), current_user: Optional[dict] = D
         except Exception as e:
             logger.warning("conversation_summary 落库失败: %s", e)
 
-    # 写入 <DATA_DIR>/memory/users/{scope}/YYYY-MM-DD.md
-    # 按用户分目录：此前所有用户（含匿名）都追加到同一个 memory/YYYY-MM-DD.md，
-    # 导致甲的对话总结乙能读到，且"第 N 次对话"计数也是全局共享的。
-    memory_root = Path(settings.UPLOAD_DIR).parent / "memory" / "users"
-    scope = f"user_{user_id}" if user_id else "anon"
-    memory_dir = memory_root / scope
-    memory_dir.mkdir(parents=True, exist_ok=True)
+    # 写入 <DATA_DIR>/tenants/{tenant}/users/{user}/memory/YYYY-MM-DD.md
+    # 按「租户 → 成员」分目录：此前所有用户（含匿名）都追加到同一个
+    # memory/YYYY-MM-DD.md，导致甲的对话总结乙能读到，且"第 N 次对话"
+    # 计数也是全局共享的。
+    memory_dir = user_memory_dir(scope_from_user(current_user))
     today = datetime.now().strftime("%Y-%m-%d")
     now = datetime.now().strftime("%H:%M:%S")
     memory_file = memory_dir / f"{today}.md"

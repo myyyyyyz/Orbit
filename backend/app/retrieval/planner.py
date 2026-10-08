@@ -125,9 +125,12 @@ _PLANNER_SYSTEM = """你是一个 RAG 检索调度器。根据用户问题，决
 示例：复合问"对比 A 和 B 的优缺点并给部署步骤" → {"retrieve":true,"strategy":"hybrid","rewritten_query":null,"subquestions":["A 的优缺点","B 的优缺点","A/B 部署步骤"],"top_k":8,"threshold":0.25,"max_iterations":2,"use_tools":false}"""
 
 
-def plan_retrieval(question: str, user_id: Optional[int] = None,
-                   api_key: Optional[str] = None) -> RetrievalPlan:
-    """规划本次提问的检索方式。best-effort：任何失败都降级为默认计划。"""
+def plan_retrieval(question: str, api_key: Optional[str] = None) -> RetrievalPlan:
+    """规划本次提问的检索方式。best-effort：任何失败都降级为默认计划。
+
+    注意：本函数**不做**作用域判定——租户身份由检索执行层从请求上下文读取
+    （见 `search()`），避免在纯 LLM 调度逻辑里混入鉴权关注点。
+    """
     key = api_key or os.getenv("LLM_API_KEY", "")
     if not key:
         return _default_plan()
@@ -236,10 +239,12 @@ def _rrf_fuse(items: list[dict], query: str, top_k: int, strategy: str) -> list[
 # ─────────────────────────────────────────────────────────────────────────
 # 计划执行器：改写 / 子问题 / 迭代 / 融合 / 过滤
 # ─────────────────────────────────────────────────────────────────────────
-def execute_retrieval_plan(question: str, user_id: Optional[int] = None,
-                           plan: Optional[RetrievalPlan] = None,
-                           api_key: Optional[str] = None) -> list[dict]:
-    """按 RetrievalPlan 执行检索，返回过滤+重排后的 chunks 列表。"""
+def execute_retrieval_plan(question: str, plan: Optional[RetrievalPlan] = None,
+                           api_key: Optional[str] = None, scope=None) -> list[dict]:
+    """按 RetrievalPlan 执行检索，返回过滤+重排后的 chunks 列表。
+
+    scope 为 TenantScope；不传时 `search()` 会读取请求级租户上下文。
+    """
     if plan is None:
         plan = _default_plan()
 
@@ -260,7 +265,7 @@ def execute_retrieval_plan(question: str, user_id: Optional[int] = None,
 
     for _ in range(iterations):
         for q in queries:
-            items = search(q, over_fetch, user_id)
+            items = search(q, over_fetch, scope)
             if not items:
                 continue
             fused = _rrf_fuse(items, q, over_fetch, plan.strategy)

@@ -2,6 +2,7 @@
 pytest 全局配置 — 测试环境隔离
 
 核心原则：所有测试数据落在临时目录，绝不污染真实 data/ 与数据库。
+- DATA_DIR  → 临时目录（DATA_DIR 环境变量，须在 import app.config 前设置）
 - ChromaDB  → 临时目录（patch settings.rag.storage.persist_dir，须在 store 初始化前）
 - SQLite    → 临时目录（DATABASE_URL 环境变量，须在 import app.config 前设置）
 - memory.db → 临时目录（patch app.memory.DB_PATH）
@@ -18,6 +19,12 @@ import tempfile
 # ── 环境变量必须在任何 app 模块 import 之前设置 ──
 TEST_ROOT = tempfile.mkdtemp(prefix="orbit_test_")
 os.environ["DATABASE_URL"] = "sqlite:///" + os.path.join(TEST_ROOT, "tenant.db")
+# 多租户改造后 DATA_DIR 成为「记忆文件 / 用量日志 / 租户目录」的总根：
+# 它是 app.config 的模块级常量，必须在此处（import app.config 之前）用环境变量覆盖，
+# 否则 app.config.DATA_DIR / app.api.usage.USAGE_LOG_PATH 等会在 import 期固化成真实
+# 项目的 data/，测试写入会被落盘并跨次运行累积（logos 用例即因此误判"用户隔离失效"）。
+os.environ["DATA_DIR"] = os.path.join(TEST_ROOT, "data")
+os.makedirs(os.environ["DATA_DIR"], exist_ok=True)
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-pytest")
 os.environ.pop("LLM_API_KEY", None)   # 确保无 key 场景确定
 os.environ.pop("LLM_MODEL", None)
@@ -96,6 +103,8 @@ def _reset_global_state() -> None:
 
     - LLM 熔断器：失败计数累积到阈值后会打开，导致后续用例静默走 fallback 分支。
     - 令牌撤销表：某个用例登出后会把 jti 永久留在撤销表里。
+    - 租户上下文：ContextVar 若被某用例显式设置（如直接用 TenantScope 调
+      `search`），必须清掉，否则后续用例的匿名断言会拿到上一个用例的租户身份。
     """
     try:
         from app.llm.retry import reset_circuit_breakers
@@ -105,6 +114,11 @@ def _reset_global_state() -> None:
     try:
         from app.middleware.auth import reset_revocation_store
         reset_revocation_store()
+    except Exception:
+        pass
+    try:
+        from app.multitenant import clear_current_scope
+        clear_current_scope()
     except Exception:
         pass
 
@@ -123,19 +137,55 @@ def client():
 
 @pytest.fixture()
 def auth_token():
-    """直接创建测试用户并签发 token（绕过 API 限流，唯一用户名避免冲突）"""
+    """直接创建测试用户并签发 token（绕过 API 限流，唯一用户名避免冲突）
+
+    ⚠️ 必须把注册返回的 tenant_id / tenant_role 写进 Token：
+    多租户改造后检索与入库都以 Token 里的租户归属为准，
+    漏带 tenant_id 会让"已登录用户"被降级到匿名沙箱（fail-closed），
+    用例会以"数据查不到"的形式失败，而看不出真正原因。
+    """
     import uuid
     from app.multitenant import register_user
     from app.middleware.auth import create_access_token
     username = "pytest_" + uuid.uuid4().hex[:8]
     result = register_user(username, "pytest_pass_123")
     assert "user_id" in result, result
-    return create_access_token(username, result["user_id"])
+    return create_access_token(
+        username, result["user_id"], result["tenant_id"],
+        tenant_role=result.get("tenant_role"),
+    )
 
 
 @pytest.fixture()
 def auth_headers(auth_token):
     return {"Authorization": "Bearer " + auth_token}
+
+
+@pytest.fixture()
+def auth_context():
+    """注册一个测试用户并返回完整身份（含请求头）。
+
+    需要断言"租户 / 个人目录"或"组织隔离边界"的用例用它，
+    避免在用例里再手工查一次 user/tenant。
+    """
+    import uuid
+    from app.multitenant import register_user
+    from app.middleware.auth import create_access_token
+    username = "pytest_ctx_" + uuid.uuid4().hex[:8]
+    result = register_user(username, "pytest_pass_123")
+    token = create_access_token(
+        username, result["user_id"], result["tenant_id"],
+        tenant_role=result.get("tenant_role"),
+    )
+    return {
+        "user_id": result["user_id"],
+        "tenant_id": result["tenant_id"],
+        "tenant_name": result.get("tenant_name"),
+        "tenant_role": result.get("tenant_role"),
+        "invite_code": result.get("invite_code"),
+        "collections": result.get("collections"),
+        "headers": {"Authorization": "Bearer " + token},
+    }
 
 
 @pytest.fixture()
@@ -154,7 +204,10 @@ def admin_headers():
     conn.execute("UPDATE users SET role='admin' WHERE id=?", (result["user_id"],))
     conn.commit()
     conn.close()
-    token = create_access_token(username, result["user_id"], role="admin")
+    token = create_access_token(
+        username, result["user_id"], result["tenant_id"],
+        role="admin", tenant_role=result.get("tenant_role"),
+    )
     return {"Authorization": "Bearer " + token}
 
 

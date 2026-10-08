@@ -20,6 +20,7 @@ from .storage import (
     stats,
     clear,
     purge_namespace,
+    purge_prefix,
     purge_user,
 )
 
@@ -37,5 +38,6 @@ __all__ = [
     "stats",
     "clear",
     "purge_namespace",
+    "purge_prefix",
     "purge_user",
 ]

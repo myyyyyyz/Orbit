@@ -30,38 +30,45 @@ MIN_RELEVANCE_SCORE = 0.3
 logger = get_logger(__name__)
 
 
-def _cache_namespace(user_id, namespace: str = None) -> str:
-    """缓存命名空间：与租户 + 活跃索引版本绑定，杜绝跨用户/跨版本串味。
+def _cache_namespace(scope=None, namespace: str = None) -> str:
+    """缓存命名空间：与「读取身份 + 活跃索引版本」绑定，杜绝跨用户/跨版本串味。
 
-    非流式路径（api/knowledge.py:api_ask）一直是这样算的，流式路径此前漏了，
-    导致全租户共享同一份缓存。任何异常都退化为按 user_id 隔离，绝不退化为全局。
+    身份键必须是 :attr:`TenantScope.read_key`（含 user 维度）而不是仅 tenant：
+    读取时会同时检索组织共享库与本人私有库，答案依赖本人的私有文档，
+    只按租户隔离会让同组织成员命中他人的私有文档缓存。
+    任何异常都退化为按身份键隔离，绝不退化为全局。
     """
     if namespace:
         return namespace
+    from ..multitenant.context import get_current_scope
+
+    resolved = scope or get_current_scope()
     try:
-        version = resolve_active_version(user_id)
-        return f"{user_id}:{version.collection_name}"
+        version = resolve_active_version(resolved)
+        return f"{resolved.read_key}|{version.collection_name}"
     except Exception:
-        logger.warning("cache_namespace_resolve_failed", user_id=user_id, exc_info=True)
-        return f"{user_id}:default"
+        logger.warning("cache_namespace_resolve_failed", exc_info=True)
+        return f"{resolved.read_key}|default"
 
 
-def stream_ask(question: str, top_k: int = None, user_id: int = None,
+def stream_ask(question: str, top_k: int = None, scope=None,
                api_key: str = None, model: str = None, namespace: str = None):
     """
     流式 RAG 问答生成器。
     yield SSE 格式的数据。
 
     参数:
-        user_id: 可选，已登录用户的 ID，用于租户隔离检索。
+        scope: TenantScope（租户作用域）。不传时取请求级上下文；
+               端点应当显式传入——SSE 响应体在端点返回后才被迭代，
+               不要依赖生成器执行时上下文仍然有效。
         api_key: 前端传入的 LLM API Key，优先于环境变量。
         model: 前端传入的模型名，优先于路由器默认模型。
-        namespace: 可选，缓存命名空间；不传时按 user_id + 活跃索引版本自动推导。
+        namespace: 可选，缓存命名空间；不传时按身份 + 活跃索引版本自动推导。
     """
     if top_k is None:
         top_k = settings.rag.retrieval.top_k
 
-    cache_ns = _cache_namespace(user_id, namespace)
+    cache_ns = _cache_namespace(scope, namespace)
 
     # ── Event 1: 开始 ──
     yield _sse("status", {"stage": "start", "question": question})
@@ -81,7 +88,7 @@ def stream_ask(question: str, top_k: int = None, user_id: int = None,
 
     # ── Event 3: 检索规划 + 检索（查询期自适应 RAG 调度）──
     # planner 在缓存未命中后才跑；无 API key / 调用失败 → 确定性默认计划。
-    plan = plan_retrieval(question, user_id=user_id, api_key=api_key)
+    plan = plan_retrieval(question, api_key=api_key)
     yield _sse("status", {
         "stage": "planned",
         "retrieve": plan.retrieve,
@@ -99,7 +106,7 @@ def stream_ask(question: str, top_k: int = None, user_id: int = None,
         yield _sse("status", {"stage": "retrieval_skipped", "reason": "planner: no retrieval needed"})
     else:
         yield _sse("status", {"stage": "retrieving", "top_k": plan.top_k})
-        chunks = execute_retrieval_plan(question, user_id=user_id, plan=plan, api_key=api_key)
+        chunks = execute_retrieval_plan(question, plan=plan, api_key=api_key, scope=scope)
 
     yield _sse("status", {
         "stage": "retrieved",

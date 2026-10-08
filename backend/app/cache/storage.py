@@ -227,14 +227,29 @@ def purge_namespace(namespace: Optional[str] = None) -> int:
 
 
 def purge_user(user_id) -> int:
-    """清除某用户的所有缓存条目，返回清除条数。
+    """清除某用户的所有缓存条目，返回清除条数（历史兼容入口）。
+
+    ⚠️ 多租户改造后缓存命名空间已改为 ``<scope.storage_key>|<collection>``，
+    不再以 ``user_id`` 开头，因此本函数对新的命名空间**不再命中**。
+    新代码请用 :func:`purge_prefix`（传 ``scope.storage_key + "|"``）。
+    """
+    return purge_prefix(f"{user_id}:")
+
+
+def purge_prefix(prefix: str) -> int:
+    """按 namespace **前缀**清除缓存条目，返回清除条数。
 
     知识库更新（上传/删除文档）后必须调用：否则用户会拿到"更新前"的旧答案，
     且因为是缓存命中，不会有任何报错或提示——属于静默错误。
-    这里按 `{user_id}:` 前缀匹配而非精确 namespace，因为发布新版本后
-    collection_name 会变化，精确匹配会漏掉旧命名空间下的陈旧条目。
+    用前缀而非精确匹配，是因为发布新版本后 collection_name 会变化，
+    精确匹配会漏掉旧命名空间下的陈旧条目。
+
+    调用方式：``purge_prefix(scope.storage_key + "|")``
+    —— ``storage_key`` 形如 ``t:org_x`` / ``t:org_x:u:3``，
+    分隔符 ``|`` 保证 ``t:org_x|`` 不会误匹配到 ``t:org_x:u:3|...``。
     """
-    prefix = f"{user_id}:"
+    if not prefix:
+        return 0
     keys = [
         k for k, v in _cache.items()
         if str(v.get("namespace") or "").startswith(prefix)
