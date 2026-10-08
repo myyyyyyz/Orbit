@@ -4,7 +4,10 @@ import pytest
 import app.router.service as router_mod  # patch 目标：route_model 定义所在模块
 from app.router import (  # 验证 __init__ 再导出兼容
     route_model, detect_intent, _regex_classify, _llm_classify,
-    RouteDecision, MODEL_PRESETS,
+    RouteDecision, MODEL_PRESETS, analyze_query,
+)
+from app.router.rules import (
+    SLOT_SPECS, _extract_slots, _missing_required_slots, _slot_question,
 )
 
 
@@ -150,3 +153,134 @@ def test_route_decision_defaults():
     assert d.temperature == 0.3
     assert d.confidence == 0.5
     assert d.needs_clarification is False
+
+
+# ── 槽位填充（SLU 的 slot filling）──
+
+def test_extract_slots_time_and_doctype():
+    slots = _extract_slots("上周的部署文档有哪些？", "document")
+    assert slots.get("time") == "上周"
+    assert slots.get("doc_type") == "部署文档"
+
+
+def test_extract_slots_absolute_time():
+    assert _extract_slots("2026年3月的周报", "document").get("time") == "2026年3月"
+
+
+def test_extract_slots_entity_not_question_word():
+    """count 意图抽「疑问词后的实体」，不是疑问词本身"""
+    slots = _extract_slots("知识库里有多少文档？", "count")
+    assert slots.get("entity") == "文档"
+
+
+def test_extract_slots_path():
+    assert _extract_slots("README.md 在哪里", "where").get("path") == "README.md"
+
+
+def test_extract_slots_language():
+    assert _extract_slots("写一个 Python 排序算法", "code_gen").get("language") == "Python"
+
+
+def test_extract_slots_error_identifier():
+    slots = _extract_slots("修复 NullPointerException 报错", "debug")
+    assert slots.get("error") == "NullPointerException"
+
+
+def test_extract_slots_undeclared_intent_returns_empty():
+    assert _extract_slots("上周的部署文档", "unknown") == {}
+    assert _extract_slots("随便什么", "balanced") == {}
+
+
+def test_missing_required_slots():
+    # "修复这个 bug" 未给出具体报错 → error 缺失
+    assert _missing_required_slots("debug", {}) == ["error"]
+    assert _missing_required_slots("debug", {"error": "NullPointerException"}) == []
+    assert _missing_required_slots("code_gen", {}) == []  # code_gen 无必填槽位
+
+
+def test_slot_question_targets_missing_slot():
+    q = _slot_question("debug", ["error"])
+    assert "报错" in q
+
+
+def test_route_model_populates_slots():
+    d = route_model("上周的部署文档有哪些？")
+    assert d.slots.get("doc_type") == "部署文档"
+    assert d.missing_slots == []
+
+
+def test_route_model_missing_slot_flagged():
+    d = route_model("修复这个 bug")
+    assert d.intent == "debug"
+    assert "error" in d.missing_slots
+
+
+def test_route_decision_defaults_empty_slots():
+    """向后兼容：不传槽位时默认为空，不报错"""
+    d = RouteDecision(tier="fast", model="gpt-4o-mini")
+    assert d.slots == {}
+    assert d.missing_slots == []
+
+
+def test_route_decision_coerces_missing_slots_tuple():
+    d = RouteDecision(tier="fast", model="m", missing_slots=("a", "b"))
+    assert d.missing_slots == ["a", "b"]
+
+
+def test_slot_specs_cover_known_intents():
+    """SLOT_SPECS 的 key 必须都是 INTENT_TAXONOMY 里真实存在的意图名"""
+    from app.router.rules import INTENT_TAXONOMY
+    valid = {name for dom in INTENT_TAXONOMY.values() for name in dom["intents"]}
+    assert set(SLOT_SPECS).issubset(valid)
+
+
+def test_prompt_injects_slots():
+    from app.llm.prompts import build_rag_user_message
+    plain = build_rag_user_message("问题", "上下文")
+    withslots = build_rag_user_message("问题", "上下文", {"time": "上周"})
+    assert "已识别到的关键信息" not in plain          # 不传槽位时保持原样
+    assert "已识别到的关键信息" in withslots
+    assert "time: 上周" in withslots
+
+
+# ── 两阶段拆分：analyze_query（可在检索前跑）──
+
+def test_analyze_query_returns_intent_and_slots():
+    a = analyze_query("上周的部署文档有哪些？")
+    assert a["intent"] == "document"
+    assert a["slots"].get("doc_type") == "部署文档"
+    assert a["slots"].get("time") == "上周"
+
+
+def test_analyze_query_does_not_need_retrieval_scores():
+    """阶段一必须能脱离检索分独立运行"""
+    a = analyze_query("什么是 RAG？")
+    assert "confidence" in a and "reason" in a
+
+
+def test_route_model_reuses_precomputed_analysis():
+    """传入预分析结果应与独立计算完全一致"""
+    q = "上周的部署文档有哪些？"
+    a = analyze_query(q)
+    d1 = route_model(q, [0.95], analysis=a)
+    d2 = route_model(q, [0.95])
+    assert d1.tier == d2.tier
+    assert d1.intent == d2.intent
+    assert d1.slots == d2.slots
+
+
+def test_route_model_ignores_stale_pipeline_when_analysis_given():
+    """传了 analysis 且给了 pipeline 时以 pipeline 为准（不静默用错陈旧结果）"""
+    from app.router.base import RouterPipeline, BaseRouter
+
+    class _ForceFast(BaseRouter):
+        name = "force_fast"
+        confidence_threshold = 0.0
+
+        def classify(self, query):
+            return "fast", 0.9, "forced"
+
+    stale = analyze_query("帮我写一个复杂系统")
+    pipe = RouterPipeline([_ForceFast()])
+    d = route_model("帮我写一个复杂系统", None, pipeline=pipe, analysis=stale)
+    assert d.intent == "forced"

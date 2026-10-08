@@ -24,6 +24,8 @@ from ..llm.client import default_base_url_for, resolve_model
 
 from ..search import search
 
+from .slot_rewrite import rewrite_query_with_slots
+
 logger = logging.getLogger(__name__)
 
 # 注意：本模块不依赖 app.config，避免导入时拉起 chroma/heavy 依赖；
@@ -240,10 +242,15 @@ def _rrf_fuse(items: list[dict], query: str, top_k: int, strategy: str) -> list[
 # 计划执行器：改写 / 子问题 / 迭代 / 融合 / 过滤
 # ─────────────────────────────────────────────────────────────────────────
 def execute_retrieval_plan(question: str, plan: Optional[RetrievalPlan] = None,
-                           api_key: Optional[str] = None, scope=None) -> list[dict]:
+                           api_key: Optional[str] = None, scope=None,
+                           slots: Optional[dict] = None,
+                           where: Optional[dict] = None) -> list[dict]:
     """按 RetrievalPlan 执行检索，返回过滤+重排后的 chunks 列表。
 
     scope 为 TenantScope；不传时 `search()` 会读取请求级租户上下文。
+    slots 为意图识别阶段抽取的结构化槽位，用于**改写**待检索 query
+    （补主语/时间锚定，而非把 key:value 塞进 embedding 文本——那会稀释语义信号）。
+    where 为可选的 Chroma 元数据精确过滤条件（doc_type 等结构化字段）。
     """
     if plan is None:
         plan = _default_plan()
@@ -251,7 +258,16 @@ def execute_retrieval_plan(question: str, plan: Optional[RetrievalPlan] = None,
     if not plan.retrieve:
         return []
 
-    base_q = plan.rewritten_query or question
+    # 槽位改写优先级低于 planner 自己的改写：planner 是 LLM 规划的完整改写，
+    # 槽位只在其为空时补语，避免覆盖规划器的意图理解。
+    base_q = plan.rewritten_query
+    if slots:
+        if not base_q:
+            base_q = rewrite_query_with_slots(question, slots)
+        else:
+            base_q = rewrite_query_with_slots(base_q, slots)
+    if not base_q:
+        base_q = question
     queries = [base_q]
     for sq in plan.subquestions:
         if sq and sq != base_q:
@@ -265,7 +281,7 @@ def execute_retrieval_plan(question: str, plan: Optional[RetrievalPlan] = None,
 
     for _ in range(iterations):
         for q in queries:
-            items = search(q, over_fetch, scope)
+            items = search(q, over_fetch, scope, where=where)
             if not items:
                 continue
             fused = _rrf_fuse(items, q, over_fetch, plan.strategy)

@@ -200,3 +200,155 @@ def _regex_classify(query: str) -> tuple[Optional[str], float, str]:
 
     # 规则无法匹配 → 升级到语义路由
     return None, 0.0, ""
+
+
+# ── 槽位（Slot）定义 ──────────────────────────────────────────
+# 槽位 = 执行该意图所需的关键参数（SLU 的槽位填充部分）。
+# 刻意与 INTENT_TAXONOMY 解耦：本层只用确定性正则抽取（零 LLM 成本、零幻觉），
+# 缺失的必填槽位用于把"你的意思是 X 吗"升级为精准的"你想查的是哪一项？"。
+
+SLOT_SPECS = {
+    "definition": {
+        "term":     {"type": "str", "required": False, "question": "你想了解哪个概念？"},
+        "time":     {"type": "str", "required": False, "question": ""},
+    },
+    "list": {
+        "doc_type": {"type": "str", "required": False, "question": "你想列出哪一类内容？"},
+        "scope":    {"type": "str", "required": False, "question": ""},
+        "time":     {"type": "str", "required": False, "question": ""},
+    },
+    "howto": {
+        "target":   {"type": "str", "required": False, "question": ""},
+        "doc_type": {"type": "str", "required": False, "question": ""},
+        "time":     {"type": "str", "required": False, "question": ""},
+    },
+    "where": {
+        "path":     {"type": "str", "required": True,  "question": "你想找的是哪个文件或路径？"},
+    },
+    "count": {
+        "entity":   {"type": "str", "required": True,  "question": "你想统计哪一类内容的数量？"},
+    },
+    "code_gen": {
+        "language": {"type": "str", "required": False, "question": "用哪种语言实现？"},
+        "target":   {"type": "str", "required": False, "question": ""},
+    },
+    "document": {
+        "doc_type": {"type": "str", "required": False, "question": "你想生成哪一类文档？"},
+        "topic":    {"type": "str", "required": False, "question": ""},
+        "time":     {"type": "str", "required": False, "question": ""},
+    },
+    "analyze": {
+        "target":   {"type": "str", "required": False, "question": ""},
+        "doc_type": {"type": "str", "required": False, "question": ""},
+        "time":     {"type": "str", "required": False, "question": ""},
+    },
+    "causal": {
+        "phenomenon": {"type": "str", "required": False, "question": ""},
+        "time":       {"type": "str", "required": False, "question": ""},
+    },
+    "security": {
+        "target": {"type": "str", "required": False, "question": ""},
+    },
+    "debug": {
+        "error":      {"type": "str", "required": True,  "question": "你遇到的具体报错信息是什么？"},
+        "component":  {"type": "str", "required": False, "question": ""},
+    },
+    "fix": {
+        "problem": {"type": "str", "required": False, "question": ""},
+    },
+    "architecture": {
+        "subject": {"type": "str", "required": False, "question": ""},
+    },
+    "workflow": {
+        "goal": {"type": "str", "required": False, "question": ""},
+    },
+}
+
+
+# 通用槽位的抽取规则（跨意图适用）
+_SLOT_TIME_LABELS = [
+    (r'前天', '前天'), (r'昨天|昨日', '昨天'), (r'今天|今日', '今天'),
+    (r'上个?星期|上周', '上周'), (r'这个?星期|本周|这周', '本周'),
+    (r'上个?月|上月', '上个月'), (r'这个?月|本月', '本月'),
+    (r'去年', '去年'), (r'今年', '今年'),
+    (r'最近|近期|近来', '最近'), (r'刚才|刚刚', '刚才'),
+]
+_SLOT_TIME_ABS_RE = r'(\d{4})年(\d{1,2})月'
+_SLOT_PATH_RE = r'[\w./\\-]+\.(?:md|py|js|jsx|ts|tsx|json|ya?ml|pdf|docx|xlsx|txt|sql|sh|conf|ini|toml)'
+_SLOT_DOC_TYPE_RE = (r'接口文档|API\s*文档|部署文档|设计方案|设计文档|架构文档|需求文档|PRD|'
+                    r'测试报告|验收报告|周报|周记|月报|复盘报告|报告|文档|手册|规范|流程图|方案')
+_SLOT_COUNT_RE = r'多少|几个|几条|几份|几项|数量|总计|总共'
+# 数量类槽位抽「疑问词后面的实体」，而非疑问词本身：
+# "知识库里有多少文档" → entity="文档"（而不是无意义的 "多少"）
+_SLOT_ENTITY_RE = r'(?:多少|几个|几条|几份|几项)([一-龥]{1,8})'
+_SLOT_LANG_RE = (r'Python|JavaScript|TypeScript|Java|Go|Rust|C\+\+|C#|PHP|Ruby|Swift|Kotlin|SQL|Shell')
+# 错误类槽位：抓异常名/错误标识，"修复这个 bug" 不命中 → 正确标记为缺失
+_SLOT_ERROR_RE = r'[\w.]*(?:Exception|Error|报错|异常|错误码)'
+
+
+def _extract_time(query: str) -> Optional[str]:
+    for pattern, label in _SLOT_TIME_LABELS:
+        if re.search(pattern, query):
+            return label
+    m = re.search(_SLOT_TIME_ABS_RE, query)
+    if m:
+        return f"{m.group(1)}年{int(m.group(2))}月"
+    return None
+
+
+def _extract_slots(query: str, intent: str) -> dict:
+    """
+    从 query 中确定性抽取槽位（零 LLM 成本）。
+
+    只抽取 SLOT_SPECS 中为当前 intent 声明的槽位；未声明的槽位返回空 dict。
+    抽取策略刻意保守——宁可少抽也不误抽，误抽会污染下游生成提示。
+    """
+    spec = SLOT_SPECS.get(intent)
+    if not spec:
+        return {}
+
+    slots = {}
+    for name in spec:
+        if name == "time":
+            value = _extract_time(query)
+        elif name == "path":
+            m = re.search(_SLOT_PATH_RE, query, re.IGNORECASE)
+            value = m.group(0) if m else None
+        elif name == "doc_type":
+            m = re.search(_SLOT_DOC_TYPE_RE, query, re.IGNORECASE)
+            value = m.group(0).strip() if m else None
+        elif name in ("count", "entity"):
+            m = re.search(_SLOT_ENTITY_RE, query)
+            value = m.group(1) if m else None
+        elif name == "error":
+            m = re.search(_SLOT_ERROR_RE, query, re.IGNORECASE)
+            value = m.group(0) if m else None
+        elif name == "language":
+            m = re.search(_SLOT_LANG_RE, query, re.IGNORECASE)
+            value = m.group(0) if m else None
+        else:
+            # 其余槽位留给后续 LLM 层抽取，当前版本刻意不猜
+            value = None
+        if value:
+            slots[name] = value
+    return slots
+
+
+def _missing_required_slots(intent: str, slots: dict) -> list:
+    """返回该 intent 下缺失的必填槽位名列表"""
+    spec = SLOT_SPECS.get(intent)
+    if not spec:
+        return []
+    return [
+        name for name, cfg in spec.items()
+        if cfg.get("required") and not slots.get(name)
+    ]
+
+
+def _slot_question(intent: str, missing: list) -> str:
+    """为第一个缺失的必填槽位生成精准追问；无缺失返回空串"""
+    if not missing:
+        return ""
+    spec = SLOT_SPECS.get(intent) or {}
+    name = missing[0]
+    return spec.get(name, {}).get("question") or ""

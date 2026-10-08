@@ -24,6 +24,30 @@ def staging_collection_name(run_id: str, user_id: Optional[int]) -> str:
     return f"kr_{tenant}_{sanitized_run}"
 
 
+def _derive_doc_type(source_path: str) -> str:
+    """
+    从 source_path 推导文档类型（用于 Chroma 元数据过滤）。
+
+    ChromaDB 要求 metadata 值为非 None 的标量，所以这里必须给出确定的兜底值，
+    不能返回 None（None 会在 upsert 时被过滤掉，字段缺失导致 where 过滤失效）。
+    """
+    if not source_path:
+        return "unknown"
+    name = source_path.replace("\\", "/").rsplit("/", 1)[-1]
+    lowered = name.lower()
+    # 关键词优先命中中文文档类型（比扩展名更贴近用户的"部署文档/接口文档"表达）
+    for keyword, label in (
+        ("部署", "部署文档"), ("接口", "接口文档"), ("api", "接口文档"),
+        ("架构", "架构文档"), ("需求", "需求文档"), ("设计", "设计文档"),
+        ("周报", "周报"), ("月报", "月报"), ("测试", "测试报告"),
+        ("验收", "验收报告"), ("复盘", "复盘报告"), ("方案", "方案"),
+    ):
+        if keyword in lowered:
+            return label
+    ext = lowered.rsplit(".", 1)[-1] if "." in lowered else ""
+    return f"file:{ext}" if ext else "unknown"
+
+
 def _chunk_metadata(chunk: KnowledgeChunk) -> dict[str, Union[str, int, float, bool]]:
     metadata: dict[str, str | int | float | Optional[bool]] = {
         **chunk.metadata,
@@ -35,6 +59,8 @@ def _chunk_metadata(chunk: KnowledgeChunk) -> dict[str, Union[str, int, float, b
         "page": chunk.page,
         "sheet": chunk.sheet,
         "heading_path": json.dumps(chunk.heading_path, ensure_ascii=False),
+        # ── 业务维度元数据：为 where 精确过滤铺路（文档类型）──
+        "doc_type": _derive_doc_type(chunk.source_path),
     }
     return {key: value for key, value in metadata.items() if value is not None}
 

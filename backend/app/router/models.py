@@ -1,7 +1,7 @@
 """路由决策的数据模型（结构化输出）"""
 
 from typing import Literal
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 
 class RouteDecision(BaseModel):
@@ -17,5 +17,16 @@ class RouteDecision(BaseModel):
     needs_clarification: bool = Field(default=False, description="是否需要追问用户")
     clarification_question: str = Field(default="", description="追问问题（needs_clarification=True 时）")
     intent: str = Field(default="balanced", description="识别的意图类型")
+    # ── 结构化槽位（SLU：槽位填充部分）──
+    slots: dict = Field(default_factory=dict, description="已抽取的槽位，如 {time:'上周', doc_type:'部署文档'}")
+    missing_slots: list = Field(default_factory=list, description="缺失的必填槽位名")
 
     model_config = ConfigDict(use_enum_values=True)
+
+    @field_validator("missing_slots")
+    @classmethod
+    def _coerce_missing(cls, v):
+        """容忍上游误传 tuple/None，统一为 list[str]"""
+        if not v:
+            return []
+        return [str(x) for x in v]

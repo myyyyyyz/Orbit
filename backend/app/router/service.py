@@ -3,7 +3,10 @@
 from typing import Optional
 
 from .models import RouteDecision
-from .rules import _regex_classify, MODEL_PRESETS, INTENT_TAXONOMY
+from .rules import (
+    _regex_classify, MODEL_PRESETS, INTENT_TAXONOMY,
+    _extract_slots, _missing_required_slots, _slot_question,
+)
 from .semantic import _semantic_classify
 from .llm import _llm_classify
 from .security import security_scan, local_model_name
@@ -42,9 +45,78 @@ def _hybrid_confidence(query: str, intent: str, rule_conf: float) -> tuple[float
     return hybrid, conflict
 
 
+def analyze_query(query: str, pipeline: Optional["RouterPipeline"] = None) -> dict:
+    """
+    阶段一：意图 + 槽位提取（**不依赖检索结果**，可在检索之前调用）。
+
+    这是 route_model 的前半段拆分，单独暴露的目的：让 stream_ask 能在检索之前
+    拿到 slots，用于 query 改写与元数据过滤，从而让槽位真正反哺检索。
+    档位决策（decide_tier）留到拿到检索分之后再做，避免"检索高置信度降级"逻辑丢失。
+
+    返回: {"intent": str, "confidence": float, "tier": str, "slots": dict,
+           "missing_slots": list, "reason": str}
+    """
+    tier = "balanced"
+    confidence = 0.5
+    intent = "balanced"
+    reason = ""
+
+    if pipeline is not None:
+        p_tier, p_conf, p_intent = pipeline.route(query)
+        tier, confidence, intent = p_tier, p_conf, p_intent
+        reason = f"自定义 Pipeline（{pipeline.routers[0].name if pipeline.routers else '?'} 等 {len(pipeline.routers)} 层）→ {tier}"
+    else:
+        # ── Layer 1: 规则引擎 ──
+        rule_tier, rule_conf, rule_intent = _regex_classify(query)
+
+        if rule_tier and rule_conf >= 0.7:
+            hybrid_conf, conflict = _hybrid_confidence(query, rule_intent, rule_conf)
+            if not conflict:
+                tier, confidence, intent = rule_tier, hybrid_conf, rule_intent
+                reason = f"规则匹配+Hybrid验证（{intent}, conf={hybrid_conf:.0%}）"
+            else:
+                llm_tier, llm_conf, llm_intent = _llm_classify(query)
+                tier, confidence, intent = llm_tier, llm_conf, llm_intent
+                reason = (f"规则冲突→LLM 分类（{intent}, conf={llm_conf:.0%}，"
+                          f"语义冲突{hybrid_conf:.0%}<{SEMANTIC_CONFLICT:.0%}）")
+        elif rule_tier:
+            tier, confidence, intent = rule_tier, rule_conf, rule_intent
+            reason = f"规则匹配（{intent}, conf={confidence:.0%}）→ 语义确认中"
+
+            sem_tier, sem_conf, sem_intent = _semantic_classify(query)
+            if sem_tier and sem_conf > rule_conf:
+                tier, confidence, intent = sem_tier, sem_conf, sem_intent
+                reason = f"语义路由覆盖（{intent}, conf={sem_conf:.0%}，超越规则 {rule_conf:.0%}）"
+        else:
+            sem_tier, sem_conf, sem_intent = _semantic_classify(query)
+            if sem_tier and sem_conf >= 0.45:
+                tier, confidence, intent = sem_tier, sem_conf, sem_intent
+                reason = f"语义路由命中（{intent}, conf={sem_conf:.0%}）"
+            elif sem_conf >= 0.25:
+                llm_tier, llm_conf, llm_intent = _llm_classify(query)
+                tier, confidence, intent = llm_tier, llm_conf, llm_intent
+                reason = f"LLM 分类（{intent}, conf={llm_conf:.0%}）"
+            else:
+                tier, confidence, intent = "unknown", 0.0, "unknown"
+                reason = "规则+语义均无法识别，标记为 unknown"
+
+    slots = _extract_slots(query, intent)
+    missing_slots = _missing_required_slots(intent, slots)
+
+    return {
+        "tier": tier,
+        "confidence": confidence,
+        "intent": intent,
+        "reason": reason,
+        "slots": slots,
+        "missing_slots": missing_slots,
+    }
+
+
 def route_model(query: str, retrieval_scores: list[float] = None,
                 budget_remaining_pct: float = 1.0,
-                pipeline: Optional["RouterPipeline"] = None) -> RouteDecision:
+                pipeline: Optional["RouterPipeline"] = None,
+                analysis: Optional[dict] = None) -> RouteDecision:
     """
     混合路由：规则引擎 → 语义路由 → LLM 分类 → 检索置信度降级 → 成本感知降级 → 安全内联
 
@@ -55,59 +127,20 @@ def route_model(query: str, retrieval_scores: list[float] = None,
 
     返回 RouteDecision（结构化路由决策）
     """
-    tier = "balanced"
-    confidence = 0.5
-    intent = "balanced"
-    reason = ""
-
-    # ── 路由决策：自定义 pipeline 或内置三层逻辑 ──
-    if pipeline is not None:
-        # R3: 自定义 pipeline 优先（用户可替换任一层的插件体系）
-        p_tier, p_conf, p_intent = pipeline.route(query)
-        tier, confidence, intent = p_tier, p_conf, p_intent
-        reason = f"自定义 Pipeline（{pipeline.routers[0].name if pipeline.routers else '?'} 等 {len(pipeline.routers)} 层）→ {tier}"
-    else:
-        # ── Layer 1: 规则引擎 ──
-        rule_tier, rule_conf, rule_intent = _regex_classify(query)
-
-        if rule_tier and rule_conf >= 0.7:
-            # R2: Hybrid 验证——仅检测语义与规则的明显冲突，降低规则假阳性
-            hybrid_conf, conflict = _hybrid_confidence(query, rule_intent, rule_conf)
-            if not conflict:
-                # 规则 + 语义不冲突 → 采用规则（hybrid 分用于展示）
-                tier, confidence, intent = rule_tier, hybrid_conf, rule_intent
-                reason = f"规则匹配+Hybrid验证（{intent}, conf={hybrid_conf:.0%}）"
-            else:
-                # 语义强烈反对规则 → 走 LLM 兜底
-                llm_tier, llm_conf, llm_intent = _llm_classify(query)
-                tier, confidence, intent = llm_tier, llm_conf, llm_intent
-                reason = (f"规则冲突→LLM 分类（{intent}, conf={llm_conf:.0%}，"
-                          f"语义冲突{hybrid_conf:.0%}<{SEMANTIC_CONFLICT:.0%}）")
-        elif rule_tier:
-            # 规则低置信度 → 保留候选，继续语义路由
-            tier, confidence, intent = rule_tier, rule_conf, rule_intent
-            reason = f"规则匹配（{intent}, conf={confidence:.0%}）→ 语义确认中"
-
-            # 同时尝试语义路由
-            sem_tier, sem_conf, sem_intent = _semantic_classify(query)
-            if sem_tier and sem_conf > rule_conf:
-                tier, confidence, intent = sem_tier, sem_conf, sem_intent
-                reason = f"语义路由覆盖（{intent}, conf={sem_conf:.0%}，超越规则 {rule_conf:.0%}）"
-        elif rule_tier is None:
-            # 规则完全未匹配 → 语义路由
-            sem_tier, sem_conf, sem_intent = _semantic_classify(query)
-            if sem_tier and sem_conf >= 0.45:
-                tier, confidence, intent = sem_tier, sem_conf, sem_intent
-                reason = f"语义路由命中（{intent}, conf={sem_conf:.0%}）"
-            elif sem_conf >= 0.25:
-                # 语义模糊 → LLM 分类
-                llm_tier, llm_conf, llm_intent = _llm_classify(query)
-                tier, confidence, intent = llm_tier, llm_conf, llm_intent
-                reason = f"LLM 分类（{intent}, conf={llm_conf:.0%}）"
-            else:
-                # 完全不确定 → unknown
-                tier, confidence, intent = "unknown", 0.0, "unknown"
-                reason = "规则+语义均无法识别，标记为 unknown"
+    # ── 路由决策：复用 analyze_query（意图+槽位，不依赖检索）──
+    # 拆两阶段的目的见 analyze_query docstring：让槽位能在检索之前产生。
+    # 调用方若已跑过 analyze_query（例如 stream_ask 在检索前跑过一次），
+    # 可把结果传进来复用，避免重复执行规则/语义/LLM 三层判定。
+    if analysis is None:
+        analysis = analyze_query(query, pipeline=pipeline)
+    elif pipeline is not None:
+        analysis = analyze_query(query, pipeline=pipeline)
+    tier = analysis["tier"]
+    confidence = analysis["confidence"]
+    intent = analysis["intent"]
+    reason = analysis["reason"]
+    slots = analysis["slots"]
+    missing_slots = analysis["missing_slots"]
 
     # ── 检索置信度降级 ──
     if retrieval_scores and len(retrieval_scores) > 0:
@@ -133,7 +166,12 @@ def route_model(query: str, retrieval_scores: list[float] = None,
         clarification_question = "抱歉，我不太确定你想做什么。能再描述一下吗？"
     elif confidence < CLARIFY_THRESHOLD and tier != "out_of_scope":
         needs_clarification = True
-        clarification_question = f"你的意思是「{INTENT_TAXONOMY.get(intent, {}).get('intents', {}).get(intent, '查询')}」吗？请确认一下。"
+        # 优先问"缺哪个参数"，比泛泛确认意图更可执行
+        slot_q = _slot_question(intent, missing_slots)
+        if slot_q:
+            clarification_question = slot_q
+        else:
+            clarification_question = f"你的意思是「{INTENT_TAXONOMY.get(intent, {}).get('intents', {}).get(intent, '查询')}」吗？请确认一下。"
 
     if tier == "out_of_scope":
         needs_clarification = True
@@ -161,6 +199,8 @@ def route_model(query: str, retrieval_scores: list[float] = None,
             needs_clarification=True,
             clarification_question=clarification_question,
             intent=intent,
+            slots=slots,
+            missing_slots=missing_slots,
         )
     elif security["injection_risk"] > 0.5:
         # 高注入风险 → 保守参数 + 明确拒绝引导
@@ -180,6 +220,8 @@ def route_model(query: str, retrieval_scores: list[float] = None,
         needs_clarification=needs_clarification,
         clarification_question=clarification_question if needs_clarification else "",
         intent=intent,
+        slots=slots,
+        missing_slots=missing_slots,
     )
 
 

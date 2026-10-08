@@ -6,7 +6,7 @@ import time
 from ..config import settings
 from ..logging_config import get_logger
 from ..retrieval import plan_retrieval, execute_retrieval_plan
-from ..router import route_model
+from ..router import route_model, analyze_query
 from ..search import resolve_active_version
 from ..cache import get as cache_get, put as cache_put
 from ..llm import (
@@ -86,6 +86,20 @@ def stream_ask(question: str, top_k: int = None, scope=None,
 
     yield _sse("status", {"stage": "cache_miss"})
 
+    # ── Event 2.5: 意图 + 槽位提取（必须在检索之前）──
+    # 拆两阶段的原因：槽位要反哺检索（query 改写 / 元数据过滤），
+    # 就必须早于检索产生；而"检索高置信度→降级模型"仍留在最终路由里，
+    # 所以这里只跑 analyze_query（不依赖检索分），档位决策留到 Event 4。
+    analysis = analyze_query(question)
+    slots = analysis.get("slots") or {}
+    yield _sse("status", {
+        "stage": "intent_analyzed",
+        "intent": analysis.get("intent"),
+        "confidence": round(analysis.get("confidence", 0.0), 4),
+        "slots": slots,
+        "missing_slots": analysis.get("missing_slots") or [],
+    })
+
     # ── Event 3: 检索规划 + 检索（查询期自适应 RAG 调度）──
     # planner 在缓存未命中后才跑；无 API key / 调用失败 → 确定性默认计划。
     plan = plan_retrieval(question, api_key=api_key)
@@ -106,7 +120,7 @@ def stream_ask(question: str, top_k: int = None, scope=None,
         yield _sse("status", {"stage": "retrieval_skipped", "reason": "planner: no retrieval needed"})
     else:
         yield _sse("status", {"stage": "retrieving", "top_k": plan.top_k})
-        chunks = execute_retrieval_plan(question, plan=plan, api_key=api_key, scope=scope)
+        chunks = execute_retrieval_plan(question, plan=plan, api_key=api_key, scope=scope, slots=slots)
 
     yield _sse("status", {
         "stage": "retrieved",
@@ -116,7 +130,7 @@ def stream_ask(question: str, top_k: int = None, scope=None,
 
     # ── Event 4: 模型路由 ──
     scores = [c["score"] for c in chunks]
-    route = route_model(question, scores)
+    route = route_model(question, scores, analysis=analysis)
     yield _sse("status", {
         "stage": "routing",
         "tier": route.tier,
@@ -124,6 +138,9 @@ def stream_ask(question: str, top_k: int = None, scope=None,
         "reason": route.reason,
         "confidence": route.confidence,
         "needs_clarification": route.needs_clarification,
+        "intent": route.intent,
+        "slots": route.slots,
+        "missing_slots": route.missing_slots,
     })
 
     # ── Event 5: 生成（流式）──
@@ -147,7 +164,7 @@ def stream_ask(question: str, top_k: int = None, scope=None,
     # 构建 LLM 请求：有相关检索结果走 RAG 模式，否则走纯对话模式
     if chunks:
         system_prompt = LENIENT_RAG_SYSTEM_PROMPT
-        user_message = build_rag_user_message(question, build_context_text(chunks))
+        user_message = build_rag_user_message(question, build_context_text(chunks), route.slots)
     else:
         system_prompt = CHAT_SYSTEM_PROMPT
         user_message = question

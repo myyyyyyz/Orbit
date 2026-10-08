@@ -8,6 +8,7 @@
 （见 `api/knowledge.py`），读取时不做这个区分。
 """
 
+import logging
 import threading
 import time
 from pathlib import Path
@@ -16,6 +17,8 @@ from typing import Optional
 from ..config import settings
 from .. import search as _search_module  # 延迟引用，允许测试 monkeypatch search.encode / get_active_index 等
 from ..multitenant.context import get_current_scope, read_scopes
+
+logger = logging.getLogger(__name__)
 
 # count 缓存（避免每次搜索都调用 O(n) 的 collection.count()）
 _count_cache: dict = {}  # {collection_name: {"value": int, "ts": float}}
@@ -72,19 +75,35 @@ def _invalidate_count_cache(name: str = None):
             _count_cache.clear()
 
 
-def _search_one(scope, query_embedding, top_k: int) -> list[dict]:
-    """在单个作用域内做向量检索。"""
+def _search_one(scope, query_embedding, top_k: int, where: dict = None) -> list[dict]:
+    """在单个作用域内做向量检索。
+
+    where: ChromaDB 元数据精确过滤条件（结构化槽位走这条路，而非 embedding）。
+    注意：Chroma 的 where 语义是「字段存在且相等」——摄取期未写入该字段的
+    chunk 会直接被过滤掉，因此调用方需确保入库时确实写了对应字段
+    （见 knowledge_agent/staging_store.py::_chunk_metadata）。
+    """
     collection, version = resolve_active_collection(scope)
     name = version.collection_name
 
     if _get_cached_count(collection, name) == 0:
         return []
 
-    results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=min(top_k, collection.count()),
-        include=["documents", "metadatas", "distances"],
-    )
+    query_kwargs = {
+        "query_embeddings": [query_embedding],
+        "n_results": min(top_k, collection.count()),
+        "include": ["documents", "metadatas", "distances"],
+    }
+    if where:
+        query_kwargs["where"] = where
+
+    try:
+        results = collection.query(**query_kwargs)
+    except Exception:
+        # 过滤字段在旧索引中不存在时降级为不过滤，绝不让检索整体失败
+        logger.warning("vector_search_where_failed_fallback", exc_info=True)
+        query_kwargs.pop("where", None)
+        results = collection.query(**query_kwargs)
 
     if not results.get("ids") or not results["ids"][0]:
         return []
@@ -106,12 +125,13 @@ def _search_one(scope, query_embedding, top_k: int) -> list[dict]:
     return items
 
 
-def search(query: str, top_k: int = None, scope=None) -> list[dict]:
+def search(query: str, top_k: int = None, scope=None, where: dict = None) -> list[dict]:
     """
     语义搜索知识库（跨"组织共享 + 个人私有"合并）。
 
     - scope=None:            取请求级租户上下文
     - scope=TenantScope(...): 显式指定；读取时仍会展开为共享∪私有
+    - where:                 可选元数据精确过滤（结构化槽位），与向量检索叠加
 
     返回: [{"text": str, "metadata": dict, "score": float}, ...]
     """
@@ -129,7 +149,7 @@ def search(query: str, top_k: int = None, scope=None) -> list[dict]:
     merged: list[dict] = []
     seen: set[str] = set()
     for one in scopes:
-        for item in _search_one(one, query_embedding, top_k):
+        for item in _search_one(one, query_embedding, top_k, where=where):
             text = item.get("text") or ""
             # 同一个 chunk 可能同时出现在两个空间（内容相同），按文本去重保留高分
             if text and text in seen:

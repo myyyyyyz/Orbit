@@ -51,9 +51,9 @@ def _mock_pipeline(monkeypatch, chunks, retrieve=True):
     )
     monkeypatch.setattr(
         stream_mod, "execute_retrieval_plan",
-        lambda q, plan=None, api_key=None, scope=None: chunks,
+        lambda q, plan=None, api_key=None, scope=None, slots=None, where=None: chunks,
     )
-    monkeypatch.setattr(stream_mod, "route_model", lambda q, s: _fake_route())
+    monkeypatch.setattr(stream_mod, "route_model", lambda q, s, **kw: _fake_route())
 
 
 GOOD_CHUNK = {"text": "Orbit 是 AI Agent 端到端系统", "metadata": {"source": "intro.md"}, "score": 0.85}
@@ -107,7 +107,7 @@ def test_cache_lookup_uses_tenant_namespace(monkeypatch, mock_llm):
         stream_mod, "plan_retrieval",
         lambda q, api_key=None: RetrievalPlan(retrieve=False),
     )
-    monkeypatch.setattr(stream_mod, "route_model", lambda q, s: _fake_route())
+    monkeypatch.setattr(stream_mod, "route_model", lambda q, s, **kw: _fake_route())
 
     list(stream_ask("问题", scope=STREAM_SCOPE, api_key="k"))
     assert seen["get_ns"] is not None
@@ -224,3 +224,6 @@ def test_status_event_sequence(monkeypatch, mock_llm):
     assert "retrieved" in stages
     assert "routing" in stages
     assert events[-1][0] == "done"
+    # 关键不变量：意图+槽位必须早于检索产生，槽位才能反哺检索
+    assert "intent_analyzed" in stages
+    assert stages.index("intent_analyzed") < stages.index("retrieving")
