@@ -13,6 +13,9 @@ venv/
 .venv/
 env/
 
+# pytest --basetemp（本机沙箱下绕过 tmpdir 限制用，勿入库）
+.pytest-tmp/
+
 # Databases
 *.db
 *.sqlite3
