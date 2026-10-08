@@ -122,5 +122,9 @@ jobs:
       - name: pip-audit
         working-directory: backend
         run: |
-          python -m pip install pip-audit
-          python -m pip-audit -r requirements.txt
+          python -m pip install --upgrade pip pip-audit
+          # ⚠️ 必须走 console script。pip-audit 的**分发名**带连字符，模块名却是
+          # `pip_audit`，所以 `python -m pip-audit` 会被解释成「找不到名为
+          # pip-audit 的模块」，报 `No module named pip-audit` —— 长期被误读成
+          # 扫描出的漏洞告警，实际只是调用名写错（装是装上了的）。
+          pip-audit -r requirements.txt
