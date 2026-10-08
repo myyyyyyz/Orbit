@@ -29,6 +29,7 @@ from .semantic import _semantic_classify
 from .llm import _llm_classify
 from .service import (
     route_model,
+    analyze_query,
     detect_intent,
     CLARIFY_THRESHOLD,
     CONFIDENCE_DOWNGRADE,
@@ -50,6 +51,7 @@ __all__ = [
     "_semantic_classify",
     "_llm_classify",
     "route_model",
+    "analyze_query",
     "detect_intent",
     "CLARIFY_THRESHOLD",
     "CONFIDENCE_DOWNGRADE",

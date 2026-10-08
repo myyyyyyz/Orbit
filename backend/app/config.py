@@ -117,8 +117,13 @@ class StorageStrategy:
     # ef_search: 检索时搜索深度，默认 10
     hnsw_ef_search: int = 10
 
-    # Collection 名称
+    # Collection 名称（全局库：历史遗留的共享空间，仅系统级使用）
     collection: str = "documents"
+
+    # 匿名（未登录）用户的独立向量空间。
+    # ⚠️ 绝不与 collection 取同一个值——否则任意未登录访客都能读写、甚至
+    # 删除全局库中的全部内容（含早期未做用户隔离时上传的数据）。
+    anon_collection: str = os.getenv("ANON_COLLECTION", "anon_sandbox")
 
     # 持久化目录 → 统一输出到 <DATA_DIR>/chroma_db
     persist_dir: str = os.path.join(DATA_DIR, "chroma_db")
@@ -205,6 +210,11 @@ class Settings:
     @property
     def CHROMA_COLLECTION(self) -> str:
         return self.rag.storage.collection
+
+    @property
+    def ANON_COLLECTION(self) -> str:
+        """匿名访客的独立向量空间（不得等于 CHROMA_COLLECTION）。"""
+        return self.rag.storage.anon_collection
 
     @property
     def EMBED_BACKEND(self) -> str:

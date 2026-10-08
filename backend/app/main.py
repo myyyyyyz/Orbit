@@ -34,6 +34,7 @@ from .api.performance import router as performance_router
 from .api.strategy import router as strategy_router
 from .api.logos import router as logos_router
 from .api.auth import router as auth_router
+from .api.tenants import router as tenants_router
 from .api.memory import router as memory_router
 from .api.onboarding import router as onboarding_router
 from .api.storage import router as storage_router
@@ -149,6 +150,7 @@ app.include_router(performance_router)
 app.include_router(strategy_router)
 app.include_router(logos_router)
 app.include_router(auth_router)
+app.include_router(tenants_router)
 app.include_router(memory_router)
 app.include_router(onboarding_router)
 app.include_router(storage_router)

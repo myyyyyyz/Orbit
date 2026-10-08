@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { auth } from "@/lib/api";
 import { motion } from "motion/react";
-import { User, Lock, ArrowRight, Loader2, AlertCircle } from "lucide-react";
+import { User, Lock, ArrowRight, Loader2, AlertCircle, Building2, Ticket } from "lucide-react";
 
 interface AuthFormProps {
   /** 匿名试用入口；不传则不显示 */
@@ -16,6 +16,9 @@ export function AuthForm({ onSkip }: AuthFormProps) {
   const [isRegister, setIsRegister] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  // 组织相关（仅注册模式）：二者留空 → 以「用户名」为名自动创建一个新组织
+  const [orgName, setOrgName] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -25,10 +28,21 @@ export function AuthForm({ onSkip }: AuthFormProps) {
     setLoading(true);
 
     try {
-      const fn = isRegister ? auth.register : auth.login;
-      const res = await fn(username, password);
-      // 后端返回 access_token + refresh_token（refresh 用于到期自动续期）
-      login(username, res.access_token, res.refresh_token, res.role);
+      const res = isRegister
+        ? await auth.register(username, password, {
+            orgName: orgName.trim() || undefined,
+            inviteCode: inviteCode.trim() || undefined,
+          })
+        : await auth.login(username, password);
+      // 后端返回 access_token + refresh_token（refresh 用于到期自动续期），
+      // 以及本次落地到的组织信息（用于展示"当前组织"与知识库空间）。
+      login(username, res.access_token, res.refresh_token, res.role, {
+        id: res.tenant_id,
+        name: res.tenant_name,
+        role: res.tenant_role,
+        invite_code: res.invite_code,
+        collections: res.collections,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "操作失败");
     } finally {
@@ -136,6 +150,40 @@ export function AuthForm({ onSkip }: AuthFormProps) {
               autoComplete={isRegister ? "new-password" : "current-password"}
             />
 
+            {isRegister && (
+              <>
+                <Field
+                  id="org-name"
+                  label="组织名（可选）"
+                  icon={<Building2 className="h-4 w-4" />}
+                  type="text"
+                  value={orgName}
+                  onChange={setOrgName}
+                  placeholder="留空则以用户名创建新组织"
+                  autoComplete="organization"
+                  required={false}
+                />
+
+                <Field
+                  id="invite-code"
+                  label="邀请码（可选）"
+                  icon={<Ticket className="h-4 w-4" />}
+                  type="text"
+                  value={inviteCode}
+                  onChange={setInviteCode}
+                  placeholder="填写后加入已有组织"
+                  autoComplete="off"
+                  required={false}
+                />
+
+                <p className="text-[0.6875rem] leading-relaxed text-muted-subtle">
+                  填邀请码 → 加入该组织（成为成员），组织名被忽略；
+                  <br />
+                  两者都留空 → 自动新建组织并成为管理员。
+                </p>
+              </>
+            )}
+
             {error && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
@@ -213,6 +261,7 @@ function Field({
   onChange,
   placeholder,
   autoComplete,
+  required = true,
 }: {
   id: string;
   label: string;
@@ -222,6 +271,7 @@ function Field({
   onChange: (v: string) => void;
   placeholder: string;
   autoComplete: string;
+  required?: boolean;
 }) {
   return (
     <div>
@@ -237,7 +287,7 @@ function Field({
           type={type}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          required
+          required={required}
           placeholder={placeholder}
           autoComplete={autoComplete}
           className="w-full rounded-lg border border-border bg-surface-sunken py-2.5 pl-10 pr-3.5 text-sm

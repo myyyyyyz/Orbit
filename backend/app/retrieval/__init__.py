@@ -11,9 +11,12 @@ from .planner import (
     plan_retrieval,
     execute_retrieval_plan,
 )
+from .slot_rewrite import rewrite_query_with_slots, build_metadata_filter
 
 __all__ = [
     "RetrievalPlan",
     "plan_retrieval",
     "execute_retrieval_plan",
+    "rewrite_query_with_slots",
+    "build_metadata_filter",
 ]

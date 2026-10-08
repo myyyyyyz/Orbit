@@ -1,4 +1,15 @@
-"""Atomic active-index promotion and rollback for Knowledge Agent runs."""
+"""Atomic active-index promotion and rollback for Knowledge Agent runs.
+
+多租户口径
+----------
+- 版本登记表按 **TenantScope** 归属（`tenant_key = scope.storage_key`），
+  与它指向的 Collection 粒度保持一致：组织共享库一套版本、每位成员的
+  私有库各自一套版本。历史实现按 `user_id` 归属，与"组织共享知识库"的
+  产品语义不符（同事之间看不到彼此的索引版本切换）。
+- `knowledge_agent_runs` 表仍按 `user_id` 归属（run 是"谁发起的一次摄取"），
+  由 `scope.user_id` 提供。这两个维度不同但都不缺：run 记发起人，
+  版本记作用域。
+"""
 
 from collections.abc import Callable
 from typing import Optional
@@ -7,7 +18,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..config import settings
+from ..multitenant.context import TenantScope, get_current_scope
 from .evaluation_repository import _ensure_evaluation_schema
 from .repository import _connect, _ensure_schema
 from .staging_store import staging_collection_name
@@ -28,12 +39,28 @@ class ActiveIndexVersion(BaseModel):
     previous_collection_name: Optional[str] = None
 
 
-def _tenant_key(user_id: Optional[int]) -> str:
-    return "global" if user_id is None else str(user_id)
+def _resolve(scope: Optional[TenantScope]) -> TenantScope:
+    return scope if scope is not None else get_current_scope()
 
 
-def _legacy_collection(user_id: Optional[int]) -> str:
-    return f"user_{user_id}" if user_id is not None else settings.CHROMA_COLLECTION
+def _tenant_key(scope: TenantScope) -> str:
+    """版本登记表的归属键。
+
+    匿名（tenant_id 缺失）用独立键 "anon"，不再复用 "global"——
+    历史版本把所有未登录请求归到 "global"，等于让匿名访客共享同一份
+    active index / release 记录。
+    """
+    return scope.storage_key
+
+
+def _legacy_collection(scope: TenantScope) -> str:
+    """尚无版本记录时的默认 Collection —— 由作用域决定，绝不落到全局库。
+
+    ⚠️ 这里是 P0-1（匿名可读写全局库）的成因所在：旧实现写成
+    `f"user_{user_id}" if user_id else settings.CHROMA_COLLECTION`，
+    未登录访客会读到（并可经由 upload/delete 改写）全局共享空间。
+    """
+    return scope.collection
 
 
 def _ensure_release_schema(connection) -> None:
@@ -67,7 +94,7 @@ def _ensure_release_schema(connection) -> None:
     )
 
 
-def _read_active(connection, user_id: Optional[int]) -> ActiveIndexVersion:
+def _read_active(connection, scope: TenantScope) -> ActiveIndexVersion:
     row = connection.execute(
         """
         SELECT active.run_id, active.collection_name, active.generation,
@@ -77,12 +104,12 @@ def _read_active(connection, user_id: Optional[int]) -> ActiveIndexVersion:
           ON releases.run_id = active.run_id
         WHERE active.tenant_key = ?
         """,
-        (_tenant_key(user_id),),
+        (_tenant_key(scope),),
     ).fetchone()
     if row is None:
         return ActiveIndexVersion(
             run_id=None,
-            collection_name=_legacy_collection(user_id),
+            collection_name=_legacy_collection(scope),
             generation=0,
             legacy=True,
         )
@@ -94,20 +121,24 @@ def _read_active(connection, user_id: Optional[int]) -> ActiveIndexVersion:
 
 
 def get_active_index(
-    *, user_id: Optional[int], database_path: Path
+    *, scope: Optional[TenantScope] = None, database_path: Path
 ) -> ActiveIndexVersion:
+    """读取某作用域当前的 active index 版本（无记录时回退到该作用域默认库）。"""
+    resolved = _resolve(scope)
     with _connect(database_path) as connection:
         _ensure_release_schema(connection)
-        return _read_active(connection, user_id)
+        return _read_active(connection, resolved)
 
 
 def promote_run(
     run_id: str,
     *,
     database_path: Path,
-    user_id: Optional[int],
+    scope: Optional[TenantScope] = None,
     collection_exists: Callable[[str], bool],
 ) -> ActiveIndexVersion:
+    resolved = _resolve(scope)
+    user_id = resolved.user_id
     collection_name = staging_collection_name(run_id, user_id)
     with _connect(database_path) as connection:
         _ensure_release_schema(connection)
@@ -133,14 +164,14 @@ def promote_run(
         if report is None or report[0] != "passed":
             raise ReleaseConflict("evaluation_not_passed")
 
-        previous = _read_active(connection, user_id)
+        previous = _read_active(connection, resolved)
         connection.execute(
             """INSERT INTO knowledge_index_releases
                (release_id, tenant_key, user_id, run_id, collection_name,
                 previous_run_id, previous_collection_name, status)
                VALUES (?, ?, ?, ?, ?, ?, ?, 'active')""",
             (
-                uuid4().hex, _tenant_key(user_id), user_id, run_id,
+                uuid4().hex, _tenant_key(resolved), user_id, run_id,
                 collection_name, previous.run_id, previous.collection_name,
             ),
         )
@@ -153,7 +184,7 @@ def promote_run(
                  user_id=excluded.user_id, run_id=excluded.run_id,
                  collection_name=excluded.collection_name,
                  generation=excluded.generation, updated_at=datetime('now')""",
-            (_tenant_key(user_id), user_id, run_id, collection_name, generation),
+            (_tenant_key(resolved), user_id, run_id, collection_name, generation),
         )
         cursor = connection.execute(
             "UPDATE knowledge_agent_runs SET status='promoted', "
@@ -175,20 +206,22 @@ def rollback_run(
     run_id: str,
     *,
     database_path: Path,
-    user_id: Optional[int],
+    scope: Optional[TenantScope] = None,
     collection_exists: Callable[[str], bool],
 ) -> ActiveIndexVersion:
+    resolved = _resolve(scope)
+    user_id = resolved.user_id
     with _connect(database_path) as connection:
         _ensure_release_schema(connection)
         connection.execute("BEGIN IMMEDIATE")
-        current = _read_active(connection, user_id)
+        current = _read_active(connection, resolved)
         if current.run_id != run_id:
             raise ReleaseConflict("run_not_active")
         release = connection.execute(
             """SELECT previous_run_id, previous_collection_name, status
                FROM knowledge_index_releases
                WHERE run_id = ? AND tenant_key = ?""",
-            (run_id, _tenant_key(user_id)),
+            (run_id, _tenant_key(resolved)),
         ).fetchone()
         if release is None:
             raise ReleaseConflict("release_not_found")
@@ -205,14 +238,14 @@ def rollback_run(
                    updated_at=datetime('now') WHERE tenant_key=?""",
             (
                 previous_run_id, previous_collection, generation,
-                _tenant_key(user_id),
+                _tenant_key(resolved),
             ),
         )
         connection.execute(
             """UPDATE knowledge_index_releases
                SET status='rolled_back', rolled_back_at=datetime('now')
                WHERE run_id=? AND tenant_key=? AND status='active'""",
-            (run_id, _tenant_key(user_id)),
+            (run_id, _tenant_key(resolved)),
         )
         cursor = connection.execute(
             "UPDATE knowledge_agent_runs SET status='rolled_back', "
@@ -222,4 +255,4 @@ def rollback_run(
         )
         if cursor.rowcount != 1:
             raise ReleaseConflict("concurrent_run_update")
-        return _read_active(connection, user_id)
+        return _read_active(connection, resolved)
